@@ -3,6 +3,13 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+*.tsbuildinfo
+# tsc -b occasionally emits compiled output next to a .ts config file if a
+# tsconfig's noEmit gets misconfigured — these should never be committed.
+tailwind.config.js
+tailwind.config.d.ts
+vite.config.js
+vite.config.d.ts
 
 # Python
 backend/.venv/
