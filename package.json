@@ -1,0 +1,16 @@
+{
+  "name": "astrohelp",
+  "private": true,
+  "workspaces": [
+    "chat-app",
+    "admin-app",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:chat": "npm run dev --workspace chat-app",
+    "dev:admin": "npm run dev --workspace admin-app",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}

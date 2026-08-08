@@ -1,0 +1,14 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E501: line length isn't a correctness issue.
+# B008: FastAPI's Depends(...)-as-a-default-argument is the required, idiomatic
+# pattern for dependency injection — not the general anti-pattern this rule targets.
+ignore = ["E501", "B008"]
