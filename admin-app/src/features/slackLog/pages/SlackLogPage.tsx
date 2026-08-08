@@ -9,7 +9,7 @@ export function SlackLogPage() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-2xl font-semibold text-night">Slack Log</h1>
+        <h1 className="font-display text-2xl font-semibold text-night">Slack Log</h1>
         <p className="text-sm text-night/50">
           Real Slack isn't wired up yet — this is a visual record of every notification that
           would have been sent.

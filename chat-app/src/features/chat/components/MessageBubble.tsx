@@ -11,7 +11,7 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
       )}
       <div
         className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-base leading-relaxed shadow-sm ${
-          isAstrologer ? "bg-harbor text-white" : "bg-white text-ink"
+          isAstrologer ? "bg-terracotta text-white" : "bg-white text-ink"
         } ${message.status === "error" ? "border border-clay" : ""}`}
       >
         {message.imagePreviewUrl && (

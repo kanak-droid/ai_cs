@@ -26,7 +26,7 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
               onKeyDown={(e) => {
                 if (e.key === "Enter") navigate(`/tickets/${ticket.id}`);
               }}
-              className="cursor-pointer border-b border-night/5 last:border-0 hover:bg-cloudline/60"
+              className="cursor-pointer border-b border-night/5 last:border-0 hover:bg-cream/60"
             >
               <td className="px-4 py-3">
                 <p className="font-medium text-night">{ticket.astrologer.name}</p>

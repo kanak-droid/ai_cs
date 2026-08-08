@@ -14,7 +14,7 @@ export function Sidebar() {
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-night/10 bg-night text-white">
       <div className="px-5 py-5">
-        <p className="text-base font-semibold">AstroHelp</p>
+        <p className="font-display text-lg font-semibold">AstroHelp</p>
         <p className="text-xs text-white/50">Admin</p>
       </div>
       <nav className="flex flex-1 flex-col gap-0.5 px-3" aria-label="Primary">

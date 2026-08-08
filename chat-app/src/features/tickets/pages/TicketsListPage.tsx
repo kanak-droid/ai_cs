@@ -9,7 +9,7 @@ export function TicketsListPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-night/10 bg-white px-4 py-3">
-        <h1 className="text-lg font-medium text-night">My Tickets</h1>
+        <h1 className="font-display text-xl font-semibold text-night">My Tickets</h1>
       </header>
       <div className="flex-1 overflow-y-auto">
         {status === "pending" && <Spinner label="Loading your tickets…" />}

@@ -25,7 +25,7 @@ export function TicketDetailPage() {
           ← Back to Tickets
         </Link>
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-night">Ticket #{ticket.id}</h1>
+          <h1 className="font-display text-2xl font-semibold text-night">Ticket #{ticket.id}</h1>
           <TicketStatusBadge status={ticket.status} />
         </div>
         <p className="text-sm capitalize text-night/50">

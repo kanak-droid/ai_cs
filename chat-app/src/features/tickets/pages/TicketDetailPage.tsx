@@ -25,7 +25,7 @@ export function TicketDetailPage() {
             />
           </svg>
         </Link>
-        <h1 className="text-lg font-medium text-night">Ticket #{ticketId}</h1>
+        <h1 className="font-display text-xl font-semibold text-night">Ticket #{ticketId}</h1>
       </header>
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {status === "pending" && <Spinner label="Loading ticket…" />}

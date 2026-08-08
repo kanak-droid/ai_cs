@@ -15,8 +15,8 @@ export function DescriptionPanel({
         </p>
         <p className="whitespace-pre-wrap text-sm text-ink">{description}</p>
       </div>
-      <div className="rounded-xl border border-night/10 bg-harbor-100 p-4">
-        <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-harbor-700">
+      <div className="rounded-xl border border-night/10 bg-terracotta-100 p-4">
+        <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-terracotta-700">
           English summary
         </p>
         <p className="whitespace-pre-wrap text-sm text-ink">{descriptionEn}</p>

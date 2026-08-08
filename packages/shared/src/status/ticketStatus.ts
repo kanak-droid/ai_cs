@@ -13,8 +13,8 @@ export const STATUS_LABELS: Record<TicketStatus, string> = {
 
 // Tailwind color tokens defined in tailwind-preset.js — never a raw hex here.
 export const STATUS_COLOR_TOKEN: Record<TicketStatus, string> = {
-  submitted: "harbor",
-  assigned_to_kam: "harbor",
+  submitted: "terracotta",
+  assigned_to_kam: "terracotta",
   under_review: "ochre",
   in_progress: "ochre",
   resolved: "moss",

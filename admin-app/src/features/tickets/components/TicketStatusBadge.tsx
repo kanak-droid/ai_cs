@@ -1,7 +1,7 @@
 import { STATUS_COLOR_TOKEN, STATUS_LABELS, type TicketStatus } from "@astrohelp/shared";
 
 const COLOR_CLASSES: Record<string, string> = {
-  harbor: "bg-harbor-100 text-harbor-700",
+  terracotta: "bg-terracotta-100 text-terracotta-700",
   ochre: "bg-ochre-100 text-ochre-700",
   moss: "bg-moss-100 text-moss-700",
   clay: "bg-clay-100 text-clay-700",

@@ -66,7 +66,7 @@ export function ChatPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-night/10 bg-white px-4 py-3">
-        <h1 className="text-lg font-medium text-night">AstroHelp</h1>
+        <h1 className="font-display text-xl font-semibold text-night">AstroHelp</h1>
         <p className="text-xs text-night/50">Usually replies instantly</p>
       </header>
       <div className="flex-1 overflow-y-auto">

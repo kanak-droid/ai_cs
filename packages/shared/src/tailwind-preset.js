@@ -5,11 +5,13 @@
  * the admin dashboard is structurally impossible rather than a matter of
  * discipline.
  *
- * Palette: a muted "dusk sky" — deliberately not the cream+terracotta or
- * teal/purple-gradient look common in AI-generated apps, and not the
- * zodiac-wheel purple-and-gold cliché either. night/harbor/cloudline read as
- * calm and trustworthy for the astrologer-facing support chat; moss/ochre/clay
- * are restrained, universal status colors for the admin dashboard.
+ * Palette: matches the AstroLokal brand itself (warm cream + terracotta +
+ * near-black, serif display headings) rather than a generic invented look —
+ * the chat webview is opened directly from the AstroLokal app, so it should
+ * read as a continuation of that product, not a visually disconnected tool.
+ * moss/ochre/clay stay as restrained, universal status colors (success /
+ * attention / error) — distinct enough from terracotta to stay legible as
+ * status, not brand, color.
  *
  * @type {import('tailwindcss').Config}
  */
@@ -18,16 +20,17 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        night: { DEFAULT: "#263449", 700: "#1D2938", 900: "#151D28" },
-        harbor: { DEFAULT: "#4A7FA5", 100: "#E3ECF2", 700: "#39647F" },
-        cloudline: { DEFAULT: "#EDF1F2" },
+        night: { DEFAULT: "#201C18", 700: "#141110", 900: "#0B0A08" },
+        terracotta: { DEFAULT: "#DC5F2A", 100: "#FBE4D3", 700: "#B8481C" },
+        cream: { DEFAULT: "#FBF3EA" },
         moss: { DEFAULT: "#5C7A5A", 100: "#E4EAE3", 700: "#465F44" },
         ochre: { DEFAULT: "#B8863B", 100: "#F3E7D2", 700: "#8F6A2E" },
         clay: { DEFAULT: "#A6453B", 100: "#F3DEDB", 700: "#7E332B" },
-        ink: { DEFAULT: "#1E2530" },
+        ink: { DEFAULT: "#241F19" },
       },
       fontFamily: {
         sans: ["Inter", "Noto Sans", "system-ui", "sans-serif"],
+        display: ["Playfair Display", "Georgia", "serif"],
       },
       fontSize: {
         xs: ["0.75rem", { lineHeight: "1rem" }],

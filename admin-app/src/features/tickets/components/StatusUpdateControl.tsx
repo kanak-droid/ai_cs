@@ -31,7 +31,7 @@ export function StatusUpdateControl({
         <select
           value={nextStatus}
           onChange={(e) => setNextStatus(e.target.value as TicketStatus)}
-          className="rounded-lg border-night/15 text-sm text-ink focus-visible:border-harbor"
+          className="rounded-lg border-night/15 text-sm text-ink focus-visible:border-terracotta"
         >
           {ADMIN_SETTABLE_STATUSES.map((status) => (
             <option key={status} value={status}>
@@ -44,7 +44,7 @@ export function StatusUpdateControl({
           onChange={(e) => setNote(e.target.value)}
           placeholder="Add a note (optional)"
           rows={2}
-          className="resize-none rounded-lg border-night/15 text-sm text-ink placeholder:text-night/40 focus-visible:border-harbor"
+          className="resize-none rounded-lg border-night/15 text-sm text-ink placeholder:text-night/40 focus-visible:border-terracotta"
         />
         <Button onClick={handleConfirm} disabled={!hasChange || update.isPending}>
           {update.isPending ? "Updating…" : `Confirm: mark as ${STATUS_LABELS[nextStatus]}`}

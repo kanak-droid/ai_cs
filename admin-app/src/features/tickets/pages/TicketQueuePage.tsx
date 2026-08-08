@@ -22,7 +22,7 @@ export function TicketQueuePage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-night">Tickets</h1>
+          <h1 className="font-display text-2xl font-semibold text-night">Tickets</h1>
           <p className="text-sm text-night/50">
             {status === "success" ? `${tickets.length} ticket${tickets.length === 1 ? "" : "s"}` : ""}
           </p>

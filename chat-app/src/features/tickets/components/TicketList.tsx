@@ -10,7 +10,7 @@ export function TicketList({ tickets }: { tickets: Ticket[] }) {
         <li key={ticket.id}>
           <Link
             to={`/tickets/${ticket.id}`}
-            className="flex flex-col gap-1.5 rounded-2xl bg-white p-4 shadow-sm transition-colors hover:bg-cloudline/60"
+            className="flex flex-col gap-1.5 rounded-2xl bg-white p-4 shadow-sm transition-colors hover:bg-cream/60"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium capitalize text-night">

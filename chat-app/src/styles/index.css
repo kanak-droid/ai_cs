@@ -10,11 +10,11 @@
   }
 
   body {
-    @apply bg-cloudline text-ink font-sans antialiased;
+    @apply bg-cream text-ink font-sans antialiased;
   }
 
   :focus-visible {
-    outline: 2px solid theme("colors.harbor.DEFAULT");
+    outline: 2px solid theme("colors.terracotta.DEFAULT");
     outline-offset: 2px;
   }
 }

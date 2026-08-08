@@ -164,10 +164,12 @@ filename is — check `alembic history`).
 
 Palette and type scale are defined once in `packages/shared/src/tailwind-preset.js` and consumed
 by both frontends via Tailwind's `presets` field, so the two apps can't visually drift apart.
-Six named colors (`night`, `harbor`, `cloudline`, `moss`, `ochre`, `clay`) — deliberately not the
-cream/terracotta or teal/purple-gradient look common in AI-generated apps, and not the
-zodiac-wheel purple-and-gold cliché either. See the preset file's header comment for the full
-rationale.
+The palette (`night`, `terracotta`, `cream`, `moss`, `ochre`, `clay`, `ink`) matches the actual
+AstroLokal brand — warm cream, terracotta accent, near-black chrome, serif display headings
+(Playfair Display) over Inter body text — since the chat webview is opened directly from the
+AstroLokal app and should read as a continuation of it, not a visually disconnected tool. `moss`
+/`ochre`/`clay` stay as restrained status colors (success/attention/error), distinct enough from
+terracotta to read as status rather than brand. See the preset file's header comment for more.
 
 ## Known limitation
 

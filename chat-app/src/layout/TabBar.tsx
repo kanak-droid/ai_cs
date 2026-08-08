@@ -18,7 +18,7 @@ export function TabBar() {
           end={to === "/"}
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors ${
-              isActive ? "text-harbor" : "text-night/50"
+              isActive ? "text-terracotta" : "text-night/50"
             }`
           }
         >

@@ -25,9 +25,9 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-cloudline px-4">
+    <div className="flex min-h-screen items-center justify-center bg-cream px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="text-3xl font-semibold text-night">AstroHelp</h1>
+        <h1 className="font-display text-3xl font-semibold text-night">AstroHelp</h1>
         <p className="mt-1 text-sm text-night/50">Admin sign in</p>
 
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
@@ -38,7 +38,7 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-harbor"
+              className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
             />
           </label>
           <label className="flex flex-col gap-1.5">
@@ -48,7 +48,7 @@ export function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-harbor"
+              className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
             />
           </label>
 

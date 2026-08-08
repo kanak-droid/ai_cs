@@ -9,7 +9,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
 
   if (status === "pending") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-cloudline">
+      <div className="flex min-h-screen items-center justify-center bg-cream">
         <Spinner label="Connecting you to AstroHelp…" />
       </div>
     );
@@ -17,7 +17,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
 
   if (status === "error") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-cloudline px-6">
+      <div className="flex min-h-screen items-center justify-center bg-cream px-6">
         <EmptyState
           title="This session has expired"
           description="Please close this window and reopen chat support from the AstroLokal app."
