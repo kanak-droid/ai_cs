@@ -82,7 +82,10 @@ def run_chat_turn(client: AgentClient, ctx: SessionContext, user_message: str) -
                     name=call.name, response={"result": result.content_for_model}
                 )
             )
-        contents.append(types.Content(role="tool", parts=response_parts))
+        # The live API rejects role="tool" ("Role 'tool' is not supported") despite
+        # some Gemini docs suggesting otherwise — function responses go back as a
+        # "user" turn, verified against the real API before landing this.
+        contents.append(types.Content(role="user", parts=response_parts))
 
     trace.truncated = True
     return ChatTurnResult(

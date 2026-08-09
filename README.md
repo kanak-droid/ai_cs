@@ -72,7 +72,7 @@ Env vars (`backend/.env`, see `.env.example` for the full list with defaults):
 | `DATABASE_URL` / `TEST_DATABASE_URL` | Postgres connection strings |
 | `JWT_SECRET` | Shared HS256 secret. The real AstroLokal backend signs astrologer JWTs with this; this service only verifies them. Admin JWTs are also signed with it, but carry a `role: "admin"` claim astrologer tokens never have, so the two can't be cross-presented. |
 | `GEMINI_API_KEY` | Required for `/api/chat` to actually reach Gemini. Without it (or with a placeholder), the endpoint returns a graceful 500 (`{"detail": "Something went wrong..."}`) — everything else in the app works fine without it. |
-| `GEMINI_MODEL` | Defaults to `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Defaults to `gemini-flash-latest` (Google's rolling alias for its current fast/cheap model — the dated `gemini-2.5-flash` snapshot has since been retired for new API keys) |
 | `MOCK_MODE` | Gates every file in `integrations/` — see "Mocked integrations" below |
 | `N8N_BEAUTIFY_WEBHOOK_URL`, `SLACK_WEBHOOK_URL` | Real endpoints to call once `MOCK_MODE=false` |
 | `CORS_ORIGINS` | Comma-separated list of frontend origins allowed to call the API |
