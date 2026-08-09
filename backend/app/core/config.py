@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     ASTROLOGER_TOKEN_ALGORITHM: str = "HS256"
     ADMIN_TOKEN_EXPIRE_HOURS: int = 8
 
-    # Anthropic
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    # Gemini
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # Mocked integrations
     MOCK_MODE: bool = True

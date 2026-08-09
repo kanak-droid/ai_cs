@@ -7,7 +7,7 @@ triage and resolve tickets from a dashboard.
 ## Architecture
 
 ```
-backend/            FastAPI + SQLAlchemy + Alembic + Postgres, Claude tool-calling agent
+backend/            FastAPI + SQLAlchemy + Alembic + Postgres, Gemini tool-calling agent
 chat-app/            Astrologer-facing chat webview (React + Vite), opened from a WebView
 admin-app/           KAM/admin dashboard (React + Vite)
 packages/shared/     Shared TypeScript types, status/color map, Tailwind design-token preset
@@ -16,11 +16,11 @@ docker-compose.yml   Postgres only — backend and both frontends run natively v
 
 Backend layering (see `backend/app/`):
 
-- `agent/` — the Claude tool-calling orchestrator. Only imports `agent/tool_schemas.py` (pure
+- `agent/` — the Gemini tool-calling orchestrator. Only imports `agent/tool_schemas.py` (pure
   data); never imports `integrations/` or `services/` directly.
 - `agent/executor.py` — the one place that resolves a tool name to a handler and dispatches it.
   This is also the **security boundary**: it unconditionally strips whatever `astrologer_id`
-  Claude supplied in a tool call and replaces it with the id from the verified JWT, before any
+  the model supplied in a tool call and replaces it with the id from the verified JWT, before any
   handler runs. Handlers never trust an `astrologer_id` from tool input.
 - `integrations/` — mocked external systems (see below). Isolated, one file each.
 - `services/` — cross-integration business logic (e.g. `ticket_service.create_ticket` does
@@ -71,8 +71,8 @@ Env vars (`backend/.env`, see `.env.example` for the full list with defaults):
 |---|---|
 | `DATABASE_URL` / `TEST_DATABASE_URL` | Postgres connection strings |
 | `JWT_SECRET` | Shared HS256 secret. The real AstroLokal backend signs astrologer JWTs with this; this service only verifies them. Admin JWTs are also signed with it, but carry a `role: "admin"` claim astrologer tokens never have, so the two can't be cross-presented. |
-| `ANTHROPIC_API_KEY` | Required for `/api/chat` to actually reach Claude. Without it, the endpoint returns a graceful 500 (`{"detail": "Something went wrong..."}`) — everything else in the app works fine without it. |
-| `ANTHROPIC_MODEL` | Defaults to `claude-sonnet-4-6` |
+| `GEMINI_API_KEY` | Required for `/api/chat` to actually reach Gemini. Without it (or with a placeholder), the endpoint returns a graceful 500 (`{"detail": "Something went wrong..."}`) — everything else in the app works fine without it. |
+| `GEMINI_MODEL` | Defaults to `gemini-2.5-flash` |
 | `MOCK_MODE` | Gates every file in `integrations/` — see "Mocked integrations" below |
 | `N8N_BEAUTIFY_WEBHOOK_URL`, `SLACK_WEBHOOK_URL` | Real endpoints to call once `MOCK_MODE=false` |
 | `CORS_ORIGINS` | Comma-separated list of frontend origins allowed to call the API |
@@ -116,7 +116,7 @@ Both point at `VITE_API_BASE_URL=http://localhost:8000` by default.
 1. Mint a token for astrologer 1, open `http://localhost:5173/?token=<JWT>`.
 2. Ask "when is my payout coming?" — the agent calls `get_payout_status` and answers from real
    (seeded) data, with a subtle "Checked your payout status" line above the reply. *(Requires
-   `ANTHROPIC_API_KEY` to be set — see above.)*
+   `GEMINI_API_KEY` to be set to a real key — see above.)*
 3. Say you want to change your profile photo, upload one — the agent calls
    `trigger_photo_beautify` then `create_support_ticket` with the beautified image attached.
 4. Check the "My Tickets" tab — the new ticket shows `Submitted → Assigned` already filled in on
@@ -173,6 +173,7 @@ terracotta to read as status rather than brand. See the preset file's header com
 
 ## Known limitation
 
-`ANTHROPIC_API_KEY` is not committed anywhere (as it shouldn't be). Without it, `/api/chat`
-returns a graceful error and the astrologer-facing chat UI shows a calm "couldn't send" state on
-the message — everything else (tickets, tracker, admin dashboard, Slack log) works without it.
+`GEMINI_API_KEY` is not committed anywhere (as it shouldn't be) — `backend/.env` currently holds
+a placeholder value. Until a real key is dropped in, `/api/chat` returns a graceful error and the
+astrologer-facing chat UI shows a calm "couldn't send" state on the message — everything else
+(tickets, tracker, admin dashboard, Slack log) works without it.

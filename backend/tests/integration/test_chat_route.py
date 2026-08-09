@@ -1,18 +1,12 @@
 from app.services import chat_service
-from tests.unit.test_agent_tool_selection import FakeAgentClient, FakeBlock, FakeMessage
+from tests.unit.test_agent_tool_selection import FakeAgentClient, text_response, tool_call_response
 
 
 def test_chat_route_returns_reply_and_trace(client, astrologer_auth_header, monkeypatch):
     fake_client = FakeAgentClient(
         [
-            FakeMessage(
-                content=[FakeBlock("tool_use", id="tool_1", name="get_payout_status", input={})],
-                stop_reason="tool_use",
-            ),
-            FakeMessage(
-                content=[FakeBlock("text", text="Your payout is scheduled.")],
-                stop_reason="end_turn",
-            ),
+            tool_call_response("get_payout_status"),
+            text_response("Your payout is scheduled."),
         ]
     )
     monkeypatch.setattr(chat_service, "get_agent_client", lambda: fake_client)

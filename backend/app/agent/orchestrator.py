@@ -1,17 +1,20 @@
-"""The Claude tool-calling loop for one chat turn.
+"""The Gemini tool-calling loop for one chat turn.
 
-Hand-written (not the Anthropic beta Tool Runner) so the astrologer_id
+Hand-written (rather than an auto-continuing helper) so the astrologer_id
 enforcement in agent/executor.py and the trace-building below both sit
-explicitly between "Claude asked for a tool" and "the tool actually ran" —
+explicitly between "the model asked for a tool" and "the tool actually ran" —
 a boundary worth keeping visible and reviewable rather than hidden inside a
 generic runner's hook API.
 
-This module imports ONLY app.agent.tool_schemas (pure data) plus
-app.agent.executor for dispatch — never app.services or app.integrations
-directly.
+This module imports app.agent.tool_schemas (pure data) plus app.agent.executor
+for dispatch — never app.services or app.integrations directly. It does talk
+directly to the google.genai `types` module, which is the AI provider's wire
+format, not a business-logic dependency.
 """
 
 from dataclasses import dataclass
+
+from google.genai import types
 
 from app.agent import executor, tool_schemas
 from app.agent.client import AgentClient
@@ -28,43 +31,58 @@ class ChatTurnResult:
     trace: list[AgentTraceStep]
 
 
-def _content_block_to_dict(block) -> dict:
-    if block.type == "text":
-        return {"type": "text", "text": block.text}
-    if block.type == "tool_use":
-        return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
-    raise ValueError(f"Unsupported content block type: {block.type}")
+def _build_tools() -> list[types.Tool]:
+    return [
+        types.Tool(
+            function_declarations=[
+                types.FunctionDeclaration(
+                    name=tool["name"],
+                    description=tool["description"],
+                    parameters_json_schema=tool["input_schema"],
+                )
+                for tool in tool_schemas.ALL_TOOLS
+            ]
+        )
+    ]
 
 
 def run_chat_turn(client: AgentClient, ctx: SessionContext, user_message: str) -> ChatTurnResult:
     system = render_system_prompt(name=ctx.name, language=ctx.language)
-    messages: list[dict] = [{"role": "user", "content": user_message}]
+    tools = _build_tools()
+    contents: list[types.Content] = [
+        types.Content(role="user", parts=[types.Part(text=user_message)])
+    ]
     trace = AgentTrace()
 
     for _ in range(MAX_ITERATIONS):
-        response = client.create(system=system, messages=messages, tools=tool_schemas.ALL_TOOLS)
-        messages.append(
-            {"role": "assistant", "content": [_content_block_to_dict(b) for b in response.content]}
-        )
+        response = client.generate(system=system, contents=contents, tools=tools)
 
-        if response.stop_reason != "tool_use":
-            final_text = "".join(b.text for b in response.content if b.type == "text")
+        if not response.candidates or response.candidates[0].content is None:
+            return ChatTurnResult(
+                reply="Sorry, I couldn't process that — could you try again?",
+                trace=trace.to_list(),
+            )
+
+        model_content = response.candidates[0].content
+        contents.append(model_content)
+        parts = model_content.parts or []
+
+        function_call_parts = [p for p in parts if p.function_call is not None]
+        if not function_call_parts:
+            final_text = "".join(p.text for p in parts if p.text is not None)
             return ChatTurnResult(reply=final_text, trace=trace.to_list())
 
-        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-        tool_results = []
-        for block in tool_use_blocks:
-            result = executor.execute(block.name, block.input, ctx)
-            trace.add(tool=block.name, ok=not result.is_error, summary=result.summary_for_trace)
-            tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result.content_for_claude,
-                    "is_error": result.is_error,
-                }
+        response_parts = []
+        for part in function_call_parts:
+            call = part.function_call
+            result = executor.execute(call.name, dict(call.args or {}), ctx)
+            trace.add(tool=call.name, ok=not result.is_error, summary=result.summary_for_trace)
+            response_parts.append(
+                types.Part.from_function_response(
+                    name=call.name, response={"result": result.content_for_model}
+                )
             )
-        messages.append({"role": "user", "content": tool_results})
+        contents.append(types.Content(role="tool", parts=response_parts))
 
     trace.truncated = True
     return ChatTurnResult(

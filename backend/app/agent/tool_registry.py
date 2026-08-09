@@ -23,7 +23,7 @@ from app.services import ticket_service
 
 @dataclass(frozen=True)
 class ToolResult:
-    content_for_claude: str
+    content_for_model: str
     summary_for_trace: str
     is_error: bool = False
 
@@ -37,7 +37,7 @@ class ToolSpec:
 def _handle_get_payout_status(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = payout_client.get_payout_status(ctx.astrologer_id)
     return ToolResult(
-        content_for_claude=(
+        content_for_model=(
             f"status={result.status} amount_inr={result.amount_inr} "
             f"scheduled_date={result.scheduled_date} last_paid_date={result.last_paid_date}"
         ),
@@ -50,13 +50,13 @@ def _handle_get_kyc_status(tool_input: dict, ctx: SessionContext) -> ToolResult:
     content = f"status={result.status}"
     if result.reason:
         content += f" reason={result.reason}"
-    return ToolResult(content_for_claude=content, summary_for_trace="Checked your KYC status")
+    return ToolResult(content_for_model=content, summary_for_trace="Checked your KYC status")
 
 
 def _handle_get_salary_details(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = salary_client.get_salary_details(ctx.astrologer_id)
     return ToolResult(
-        content_for_claude=(
+        content_for_model=(
             f"monthly_salary_inr={result.monthly_salary_inr} "
             f"last_revision_date={result.last_revision_date} next_review_date={result.next_review_date}"
         ),
@@ -67,7 +67,7 @@ def _handle_get_salary_details(tool_input: dict, ctx: SessionContext) -> ToolRes
 def _handle_get_assigned_admin(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = admin_mapping_client.get_assigned_admin(ctx.db, ctx.astrologer_id)
     return ToolResult(
-        content_for_claude=f"assigned_admin_id={result.admin_id}",
+        content_for_model=f"assigned_admin_id={result.admin_id}",
         summary_for_trace="Looked up your assigned support contact",
     )
 
@@ -76,13 +76,13 @@ def _handle_trigger_photo_beautify(tool_input: dict, ctx: SessionContext) -> Too
     image_url = tool_input.get("image_url")
     if not image_url:
         return ToolResult(
-            content_for_claude="error: image_url is required",
+            content_for_model="error: image_url is required",
             summary_for_trace="Photo beautify failed — no image provided",
             is_error=True,
         )
     result = n8n_client.trigger_photo_beautify(ctx.astrologer_id, image_url)
     return ToolResult(
-        content_for_claude=f"processed_image_url={result.processed_image_url}",
+        content_for_model=f"processed_image_url={result.processed_image_url}",
         summary_for_trace="Ran your photo through the beautify pipeline",
     )
 
@@ -100,7 +100,7 @@ def _handle_create_support_ticket(tool_input: dict, ctx: SessionContext) -> Tool
     )
     ticket_read = TicketRead.model_validate(ticket)
     return ToolResult(
-        content_for_claude=ticket_read.model_dump_json(),
+        content_for_model=ticket_read.model_dump_json(),
         summary_for_trace=f"Created ticket #{ticket.id} for you",
     )
 
@@ -109,7 +109,7 @@ def _handle_get_tickets(tool_input: dict, ctx: SessionContext) -> ToolResult:
     tickets = ticket_service.list_tickets_for_astrologer(ctx.db, ctx.astrologer_id)
     tickets_read = [TicketRead.model_validate(t).model_dump() for t in tickets]
     return ToolResult(
-        content_for_claude=str(tickets_read),
+        content_for_model=str(tickets_read),
         summary_for_trace="Looked up your tickets",
     )
 

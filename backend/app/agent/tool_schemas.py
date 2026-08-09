@@ -1,10 +1,13 @@
-"""Pure-data tool definitions passed to the Anthropic `tools=[...]` parameter.
+"""Pure-data tool definitions. agent/orchestrator.py translates each of these
+into a Gemini `types.FunctionDeclaration` (name/description/input_schema map
+onto name/description/parameters_json_schema) — this file itself stays
+provider-neutral.
 
-Deliberately no `astrologer_id` property on any of these — Claude is told the
-astrologer's identity narratively in the system prompt for reasoning, but has
-no schema slot to place an id in. The real enforcement lives in
-agent/executor.py, which never trusts a tool_use input for identity anyway;
-this is defense in depth, not the enforcement itself.
+Deliberately no `astrologer_id` property on any of these — the model is told
+the astrologer's identity narratively in the system prompt for reasoning, but
+has no schema slot to place an id in. The real enforcement lives in
+agent/executor.py, which never trusts a tool call's input for identity
+anyway; this is defense in depth, not the enforcement itself.
 """
 
 GET_PAYOUT_STATUS = {

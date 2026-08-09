@@ -1,33 +1,40 @@
-"""Thin wrapper around the Anthropic SDK so the orchestrator depends on one
-narrow interface (`create`) that tests can swap for a fake — never on the SDK
-client directly.
+"""Thin wrapper around the Gemini SDK so the orchestrator depends on one
+narrow interface (`generate`) that tests can swap for a fake — never on the
+SDK client directly.
 """
 
 from typing import Protocol
 
-import anthropic
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 
 
 class AgentClient(Protocol):
-    def create(self, *, system: str, messages: list[dict], tools: list[dict]) -> anthropic.types.Message:
+    def generate(
+        self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
+    ) -> types.GenerateContentResponse:
         ...
 
 
-class AnthropicAgentClient:
+class GeminiAgentClient:
     def __init__(self) -> None:
-        self._client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
-    def create(self, *, system: str, messages: list[dict], tools: list[dict]) -> anthropic.types.Message:
-        return self._client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=2048,
-            system=system,
-            messages=messages,
-            tools=tools,
+    def generate(
+        self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
+    ) -> types.GenerateContentResponse:
+        return self._client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                tools=tools,
+                max_output_tokens=2048,
+            ),
         )
 
 
 def get_agent_client() -> AgentClient:
-    return AnthropicAgentClient()
+    return GeminiAgentClient()
