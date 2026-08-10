@@ -2,8 +2,9 @@ from sqlalchemy.orm import Session
 
 from app.agent.client import AgentClient, get_agent_client
 from app.agent.context import SessionContext
-from app.agent.orchestrator import ChatTurnResult, run_chat_turn
+from app.agent.orchestrator import ChatTurnResult, HistoryTurn, run_chat_turn
 from app.core.security import AstrologerContext
+from app.schemas.chat import ChatHistoryTurn
 
 
 def handle_chat_turn(
@@ -11,6 +12,7 @@ def handle_chat_turn(
     astrologer: AstrologerContext,
     message: str,
     *,
+    history: list[ChatHistoryTurn] | None = None,
     client: AgentClient | None = None,
 ) -> ChatTurnResult:
     ctx = SessionContext(
@@ -19,4 +21,5 @@ def handle_chat_turn(
         language=astrologer.language,
         db=db,
     )
-    return run_chat_turn(client or get_agent_client(), ctx, message)
+    agent_history = [HistoryTurn(role=turn.role, text=turn.text) for turn in (history or [])]
+    return run_chat_turn(client or get_agent_client(), ctx, message, history=agent_history)

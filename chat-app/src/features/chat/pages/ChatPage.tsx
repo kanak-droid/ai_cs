@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ChatHistoryTurn } from "@astrohelp/shared";
 
 import { useAstrologer } from "../../../session/AstrologerContext";
 import { useSendMessage } from "../api/useSendMessage";
@@ -10,6 +11,15 @@ let nextId = 0;
 function makeId(): string {
   nextId += 1;
   return `msg-${nextId}`;
+}
+
+// "welcome" is a client-only greeting the backend never saw — everything
+// else is a real turn the model needs to remember across requests (the
+// backend is stateless per-call).
+function toHistory(messages: DisplayMessage[]): ChatHistoryTurn[] {
+  return messages
+    .filter((m) => m.id !== "welcome")
+    .map((m) => ({ role: m.role, text: m.text }));
 }
 
 export function ChatPage() {
@@ -27,6 +37,7 @@ export function ChatPage() {
   ]);
 
   async function handleSend(text: string, attachment?: { file: File; previewUrl: string }) {
+    const history = toHistory(messages);
     const outgoingId = makeId();
     const displayText = text || "Here's my photo.";
     setMessages((prev) => [
@@ -45,7 +56,7 @@ export function ChatPage() {
       : displayText;
 
     try {
-      const response = await sendMessage.mutateAsync(messageForBackend);
+      const response = await sendMessage.mutateAsync({ message: messageForBackend, history });
       setMessages((prev) => [
         ...prev.map((m) => (m.id === outgoingId ? { ...m, status: "sent" as const } : m)),
         {

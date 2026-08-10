@@ -2,7 +2,7 @@ from google.genai import types
 
 from app.agent import executor
 from app.agent.context import SessionContext
-from app.agent.orchestrator import MAX_ITERATIONS, run_chat_turn
+from app.agent.orchestrator import MAX_ITERATIONS, HistoryTurn, run_chat_turn
 from app.integrations import payout_client
 
 
@@ -35,12 +35,42 @@ class FakeAgentClient:
         self.calls = []
 
     def generate(self, *, system, contents, tools):
-        self.calls.append({"system": system, "contents": contents, "tools": tools})
+        # Snapshot contents — the orchestrator keeps appending to the same
+        # list object after this call, so recording a live reference would
+        # make every recorded call reflect the final state, not what was
+        # actually sent at the time.
+        self.calls.append({"system": system, "contents": list(contents), "tools": tools})
         return self.responses.pop(0)
 
 
 def make_ctx(db_session, astrologer_id=1) -> SessionContext:
     return SessionContext(astrologer_id=astrologer_id, name="Test", language="English", db=db_session)
+
+
+def test_orchestrator_sends_prior_history_to_the_model(db_session):
+    # Regression test: the backend is stateless across /api/chat requests, so
+    # without threading `history` into `contents`, the model would have no
+    # memory of anything said earlier — e.g. it couldn't write a ticket
+    # summary reflecting the real issue, only the astrologer's latest message.
+    ctx = make_ctx(db_session)
+    fake_client = FakeAgentClient([text_response("I'll raise a ticket for that.")])
+    history = [
+        HistoryTurn(role="astrologer", text="What's my KYC status?"),
+        HistoryTurn(role="assistant", text="Your KYC is pending review."),
+    ]
+
+    run_chat_turn(
+        fake_client, ctx, "No I am not satisfied, connect me to a person", history=history
+    )
+
+    sent_contents = fake_client.calls[0]["contents"]
+    assert len(sent_contents) == 3
+    assert sent_contents[0].role == "user"
+    assert sent_contents[0].parts[0].text == "What's my KYC status?"
+    assert sent_contents[1].role == "model"
+    assert sent_contents[1].parts[0].text == "Your KYC is pending review."
+    assert sent_contents[2].role == "user"
+    assert sent_contents[2].parts[0].text == "No I am not satisfied, connect me to a person"
 
 
 def test_orchestrator_calls_matching_tool_and_returns_final_reply(db_session):

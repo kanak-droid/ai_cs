@@ -31,6 +31,21 @@ class ChatTurnResult:
     trace: list[AgentTraceStep]
 
 
+@dataclass(frozen=True)
+class HistoryTurn:
+    """One earlier turn of this conversation, supplied by the caller.
+
+    The backend is stateless across /api/chat requests, so without this the
+    model has no memory of anything said before the current message — which
+    among other things makes it impossible for it to write a ticket summary
+    that reflects the real issue rather than just the astrologer's latest
+    message.
+    """
+
+    role: str  # "astrologer" | "assistant"
+    text: str
+
+
 def _build_tools() -> list[types.Tool]:
     return [
         types.Tool(
@@ -46,12 +61,23 @@ def _build_tools() -> list[types.Tool]:
     ]
 
 
-def run_chat_turn(client: AgentClient, ctx: SessionContext, user_message: str) -> ChatTurnResult:
+def run_chat_turn(
+    client: AgentClient,
+    ctx: SessionContext,
+    user_message: str,
+    *,
+    history: list[HistoryTurn] | None = None,
+) -> ChatTurnResult:
     system = render_system_prompt(name=ctx.name, language=ctx.language)
     tools = _build_tools()
     contents: list[types.Content] = [
-        types.Content(role="user", parts=[types.Part(text=user_message)])
+        types.Content(
+            role="user" if turn.role == "astrologer" else "model",
+            parts=[types.Part(text=turn.text)],
+        )
+        for turn in (history or [])
     ]
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
     trace = AgentTrace()
 
     for _ in range(MAX_ITERATIONS):

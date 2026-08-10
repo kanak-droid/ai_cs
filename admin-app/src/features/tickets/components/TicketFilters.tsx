@@ -24,7 +24,7 @@ export function TicketFilters() {
       <select
         value={searchParams.get("status") ?? ""}
         onChange={(e) => updateParam("status", e.target.value)}
-        className="rounded-lg border-night/15 text-sm text-ink focus-visible:border-terracotta"
+        className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
       >
         <option value="">All statuses</option>
         {ALL_STATUSES.map((status) => (
@@ -37,7 +37,7 @@ export function TicketFilters() {
       <select
         value={searchParams.get("assigned_admin_id") ?? ""}
         onChange={(e) => updateParam("assigned_admin_id", e.target.value)}
-        className="rounded-lg border-night/15 text-sm text-ink focus-visible:border-terracotta"
+        className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
       >
         <option value="">All admins</option>
         {admins?.map((admin) => (
@@ -50,7 +50,7 @@ export function TicketFilters() {
       <select
         value={searchParams.get("sort") ?? "desc"}
         onChange={(e) => updateParam("sort", e.target.value)}
-        className="rounded-lg border-night/15 text-sm text-ink focus-visible:border-terracotta"
+        className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
       >
         <option value="desc">Newest first</option>
         <option value="asc">Oldest first</option>

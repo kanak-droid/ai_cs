@@ -59,8 +59,9 @@ CREATE_SUPPORT_TICKET = {
     "description": (
         "Create a support ticket for an issue you cannot resolve directly, or when the "
         "astrologer says they are not satisfied with your answer. Always provide a clear "
-        "category/sub_category and an English summary so admins who may not read the "
-        "astrologer's language can triage it."
+        "category/sub_category and a real summary of the underlying issue (not just the "
+        "astrologer's most recent message) so admins who may not read the astrologer's "
+        "language can triage it."
     ),
     "input_schema": {
         "type": "object",
@@ -75,11 +76,21 @@ CREATE_SUPPORT_TICKET = {
             },
             "description": {
                 "type": "string",
-                "description": "The issue described in the astrologer's own words/language.",
+                "description": (
+                    "A summary, in the astrologer's own language, of the actual underlying "
+                    "issue across the WHOLE conversation so far — what they originally asked, "
+                    "what you found or told them, and why they remain unsatisfied or need a "
+                    "human. Never just the astrologer's single most recent message on its own "
+                    "(e.g. 'connect me to a person' or 'I'm not satisfied' tells an admin "
+                    "nothing) — always name the actual topic."
+                ),
             },
             "description_en": {
                 "type": "string",
-                "description": "A clear English summary of the issue, for admins.",
+                "description": (
+                    "The same summary as `description`, written in clear English for admins "
+                    "who may not read the astrologer's language."
+                ),
             },
             "attachment_url": {
                 "type": "string",
