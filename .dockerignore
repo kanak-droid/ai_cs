@@ -1,9 +1,16 @@
-# Used by the two frontend Dockerfiles (admin-app/Dockerfile, chat-app/Dockerfile),
-# which build from the repo root so npm workspaces can resolve packages/shared.
+# Used by every Dockerfile that builds from the repo root (admin-app/Dockerfile,
+# and backend/Dockerfile — the latter also builds chat-app's SPA into itself,
+# so backend/ can't be blanket-excluded here the way it used to be).
 node_modules/
 */node_modules/
-backend/
 .git/
 .claude/
 **/dist/
 **/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/credentials/
+backend/uploads/
+.env
+.env.*.local

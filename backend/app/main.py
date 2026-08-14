@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import auth, chat, feedback, tickets, uploads
@@ -20,6 +20,11 @@ from app.core.errors import AppError
 from app.core.uploads import UPLOAD_DIR
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# The built chat-app SPA, copied in by backend/Dockerfile's frontend-builder
+# stage — absent in local dev (chat-app runs via its own `npm run dev`
+# instead), which is why every route below is registered behind an
+# existence check rather than assuming it's always there.
+CHAT_DIST_DIR = Path(__file__).resolve().parent / "chat_static"
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +76,27 @@ app.include_router(admin_sheets_sync.router)
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+def _is_reserved_path(full_path: str) -> bool:
+    return full_path == "health" or full_path.startswith(("api/", "uploads/", "static/"))
+
+
+if CHAT_DIST_DIR.exists():
+    app.mount(
+        "/assets", StaticFiles(directory=str(CHAT_DIST_DIR / "assets")), name="chat-assets"
+    )
+
+    # Registered last, so every route/mount above gets first chance to match.
+    # Anything left over is either a real chat-app asset (favicon, etc.) or a
+    # client-side route (e.g. /tickets/5) that only React Router understands
+    # — index.html is served either way, mirroring nginx's old
+    # `try_files $uri $uri/ /index.html` for the same SPA.
+    @app.get("/{full_path:path}")
+    def serve_chat_app(full_path: str) -> FileResponse:
+        if _is_reserved_path(full_path):
+            raise HTTPException(status_code=404)
+        candidate = CHAT_DIST_DIR / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(CHAT_DIST_DIR / "index.html")

@@ -953,3 +953,41 @@ identity boundary in §4 holds even when the model tries to override it.
   by design (the domain check is the gate), but nothing yet throttles repeat
   requests for the same email — low risk while it only sends a mocked email,
   worth revisiting before a real provider is wired in.
+
+## 14. Deployment shape (2026-08-14)
+
+Three Docker images (backend, admin-app, chat-app) were originally planned as
+three separate Devtron apps; this was consolidated to two:
+
+- **backend+chat** (`backend/Dockerfile`, build context = repo root) — one
+  image, one process. A Node stage compiles chat-app's SPA (needs the repo
+  root for npm workspace resolution), then its `dist/` is copied into
+  `app/chat_static/` inside the Python image. `app/main.py` serves
+  `/api/*`, `/uploads/*`, `/static/*`, `/health` exactly as before, plus —
+  only when `app/chat_static/` exists, which it never does in local dev —
+  an `/assets` mount and a catch-all SPA-fallback route that replicates
+  nginx's old `try_files $uri $uri/ /index.html` for chat-app's
+  client-side routes (react-router paths like `/tickets/5` have no
+  matching file on disk, so they fall through to `index.html`).
+  `VITE_API_BASE_URL` is baked in as `""` (same-origin) instead of an
+  absolute URL.
+- **admin-app** (`admin-app/Dockerfile`) — unchanged, its own image and
+  deployment, still calling the backend cross-origin (needs its own entry
+  in `CORS_ORIGINS`).
+
+Reasoning: astrologers open chat directly from their device — same
+audience/traffic as the API it calls — so folding those two together
+removes one CORS origin and one Devtron app with no real downside. The
+admin dashboard is a different audience (KAM/CS staff) with an independent
+release cadence, so it stays separate; folding it in too would mean losing
+nginx's caching/gzip for that build and coupling its restarts to backend
+deploys. Local dev is unaffected: chat-app still runs via its own
+`npm run dev` (port 5173) against the backend on 8000, cross-origin,
+exactly as before — the merge only changes the production Docker image.
+
+Supersedes part of §9: the astrologer token described there (a signed
+JWT) was replaced the same day with a plain, unsigned `user_id` resolved
+directly against `Astrologer.user_id` (`auth_service.resolve_astrologer_by_user_id`)
+— matching how the real AstroLokal app's banner hand-off actually works,
+with no shared secret on that side at all. The admin token (JWT) is
+unaffected.

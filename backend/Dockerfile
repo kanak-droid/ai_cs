@@ -1,7 +1,27 @@
-# Build context: backend/ (self-contained — no npm workspace dependency
-# like the two frontend Dockerfiles have).
-FROM python:3.12-slim
+# Build context MUST be the repo root, not backend/ — this image now also
+# builds and serves the chat-app SPA from the same process (see the SPA
+# catch-all route at the bottom of app/main.py), which needs npm workspaces
+# resolved from the root package.json/package-lock.json + packages/shared.
+# e.g., from the repo root:
+#   docker build -f backend/Dockerfile -t astrohelp-backend .
+#
+# VITE_API_BASE_URL is baked into the chat-app bundle at build time. Leave it
+# empty (the default) — same-origin, since this one process now serves both
+# the API and the chat webview. Only set it if chat-app is ever split back
+# out to call this backend cross-origin.
+FROM node:20-alpine AS frontend-builder
+WORKDIR /repo
 
+COPY package.json package-lock.json ./
+COPY chat-app chat-app
+COPY packages packages
+RUN npm ci
+
+ARG VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build --workspace chat-app
+
+FROM python:3.12-slim
 WORKDIR /app
 
 # Postgres client headers for psycopg2-binary's build (most wheels are
@@ -9,10 +29,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/. .
+COPY --from=frontend-builder /repo/chat-app/dist ./app/chat_static
 
 EXPOSE 8000
 
