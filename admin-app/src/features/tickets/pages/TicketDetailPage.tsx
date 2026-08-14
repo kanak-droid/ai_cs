@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { EmptyState } from "../../../components/EmptyState";
 import { Spinner } from "../../../components/Spinner";
 import { useTicketDetail } from "../api/useTicketDetail";
+import { AssignedToCard } from "../components/AssignedToCard";
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { ContactInfoCard } from "../components/ContactInfoCard";
 import { DescriptionPanel } from "../components/DescriptionPanel";
@@ -27,6 +28,17 @@ export function TicketDetailPage() {
         <div className="mt-2 flex items-center gap-3">
           <h1 className="font-display text-2xl font-semibold text-night">Ticket #{ticket.id}</h1>
           <TicketStatusBadge status={ticket.status} />
+          {ticket.satisfaction && (
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                ticket.satisfaction === "satisfied"
+                  ? "bg-moss-100 text-moss-700"
+                  : "bg-clay-100 text-clay-700"
+              }`}
+            >
+              {ticket.satisfaction === "satisfied" ? "😊 Satisfied" : "😕 Unsatisfied"}
+            </span>
+          )}
         </div>
         <p className="text-sm capitalize text-night/50">
           {ticket.category.replace(/_/g, " ")} · {ticket.sub_category.replace(/_/g, " ")}
@@ -45,6 +57,12 @@ export function TicketDetailPage() {
         </div>
         <div className="flex flex-col gap-4">
           <ContactInfoCard astrologer={ticket.astrologer} />
+          <AssignedToCard
+            assignedAdminId={ticket.assigned_admin_id}
+            assignedCsId={ticket.assigned_cs_id}
+            kamNotified={ticket.kam_notified}
+            csNotified={ticket.cs_notified}
+          />
           <StatusUpdateControl ticketId={ticket.id} currentStatus={ticket.status} />
         </div>
       </div>

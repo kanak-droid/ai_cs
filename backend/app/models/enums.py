@@ -18,3 +18,33 @@ ADMIN_SETTABLE_STATUSES = (
     TicketStatus.RESOLVED,
     TicketStatus.CLOSED,
 )
+
+
+class SessionResolution(str, enum.Enum):
+    """How a ChatSession ended, for analytics — see app/models/chat_session.py."""
+
+    BOT = "bot"
+    ESCALATED = "escalated"
+
+
+class AdminRole(str, enum.Enum):
+    """KAM = personal point of contact, round-robin assigned to tickets
+    (admin_mapping_client). CS = general support, sees everything in the
+    dashboard but is never itself assigned as a ticket's KAM — see
+    ticket_service.py's priority-aware routing (§7b in the approach doc).
+    OTHERS = dashboard access for anyone who is neither — e.g. management —
+    behaves like CS for ticket-routing purposes (never round-robin assigned)."""
+
+    KAM = "kam"
+    CS = "cs"
+    OTHERS = "others"
+
+
+class AdminAccessLevel(str, enum.Enum):
+    """Dashboard privilege level — orthogonal to AdminRole (kam/cs), which is
+    about ticket routing, not permissions. ADMIN can grant/manage other
+    people's dashboard access (see auth_service.grant_access); NORMAL can
+    only work tickets."""
+
+    NORMAL = "normal"
+    ADMIN = "admin"

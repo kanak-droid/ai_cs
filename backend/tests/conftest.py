@@ -1,5 +1,6 @@
 from collections.abc import Generator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -14,6 +15,24 @@ from app.db.base import Base
 from app.main import app
 from app.models.admin import Admin
 from app.models.astrologer import Astrologer
+from app.models.enums import AdminAccessLevel
+
+
+@pytest.fixture(autouse=True)
+def _isolate_from_real_network(monkeypatch):
+    # Whatever a developer's local .env has MOCK_MODE/SLACK_MOCK_MODE set to
+    # (e.g. a real Slack webhook wired up for manual testing) must never leak
+    # into the test suite — tests always exercise the mocked path. A blocked
+    # httpx call as a backstop turns "forgot to mock this" into a loud
+    # failure instead of a real network call slipping through.
+    monkeypatch.setattr(settings, "MOCK_MODE", True)
+    monkeypatch.setattr(settings, "SLACK_MOCK_MODE", True)
+
+    def _blocked(*args, **kwargs):
+        raise RuntimeError("Real network calls are not allowed in tests.")
+
+    monkeypatch.setattr(httpx, "post", _blocked)
+    monkeypatch.setattr(httpx, "get", _blocked)
 
 
 @pytest.fixture(scope="session")
@@ -78,11 +97,26 @@ def seeded_admin(db_session) -> Admin:
 
 
 @pytest.fixture()
+def seeded_admin_access_admin(db_session) -> Admin:
+    admin = Admin(
+        name="Test Super Admin",
+        email="super-admin@test.example",
+        password_hash=hash_password("test-password"),
+        slack_channel="#test",
+        access_level=AdminAccessLevel.ADMIN,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    return admin
+
+
+@pytest.fixture()
 def seeded_astrologer(db_session, seeded_admin) -> Astrologer:
     astrologer = Astrologer(
         name="Test Astrologer",
         phone="+91-90000-00000",
         language="Hindi",
+        user_id=500001,
         assigned_admin_id=seeded_admin.id,
     )
     db_session.add(astrologer)
@@ -92,21 +126,22 @@ def seeded_astrologer(db_session, seeded_admin) -> Astrologer:
 
 @pytest.fixture()
 def admin_auth_header(seeded_admin) -> dict:
-    token = issue_admin_token(seeded_admin.id, seeded_admin.email)
+    token = issue_admin_token(seeded_admin.id, seeded_admin.email, seeded_admin.access_level.value)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def admin_access_auth_header(seeded_admin_access_admin) -> dict:
+    token = issue_admin_token(
+        seeded_admin_access_admin.id,
+        seeded_admin_access_admin.email,
+        seeded_admin_access_admin.access_level.value,
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
 def astrologer_auth_header(seeded_astrologer) -> dict:
-    import jwt
-
-    token = jwt.encode(
-        {
-            "astrologer_id": seeded_astrologer.id,
-            "name": seeded_astrologer.name,
-            "language": seeded_astrologer.language,
-        },
-        settings.JWT_SECRET,
-        algorithm=settings.ASTROLOGER_TOKEN_ALGORITHM,
-    )
-    return {"Authorization": f"Bearer {token}"}
+    # No signing on the astrologer side — the webview URL (and, here, the
+    # Authorization header standing in for it) carries the plain user_id.
+    return {"Authorization": f"Bearer {seeded_astrologer.user_id}"}

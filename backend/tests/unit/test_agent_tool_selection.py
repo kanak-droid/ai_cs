@@ -3,7 +3,21 @@ from google.genai import types
 from app.agent import executor
 from app.agent.context import SessionContext
 from app.agent.orchestrator import MAX_ITERATIONS, HistoryTurn, run_chat_turn
-from app.integrations import payout_client
+from app.integrations import payout_client, queue_performance_client
+from app.integrations.queue_performance_client import QueuePerformance
+
+
+def _force_priority(monkeypatch, priority: int) -> None:
+    def fake_get_queue_performance(db, astrologer_id):
+        return QueuePerformance(
+            astrologer_id=astrologer_id,
+            priority=priority,
+            users_connected=0,
+            queues_connected=0,
+            total_talktime_min=0,
+        )
+
+    monkeypatch.setattr(queue_performance_client, "get_queue_performance", fake_get_queue_performance)
 
 
 def text_response(text: str) -> types.GenerateContentResponse:
@@ -93,7 +107,7 @@ def test_orchestrator_calls_matching_tool_and_returns_final_reply(db_session):
 def test_astrologer_id_supplied_by_the_model_is_ignored_and_overwritten(db_session, monkeypatch):
     captured = {}
 
-    def fake_get_payout_status(astrologer_id):
+    def fake_get_payout_status(db, astrologer_id):
         captured["astrologer_id"] = astrologer_id
         return payout_client.PayoutStatus(
             astrologer_id=astrologer_id,
@@ -116,6 +130,176 @@ def test_unknown_tool_returns_error_without_raising(db_session):
     ctx = make_ctx(db_session)
     result = executor.execute("delete_everything", {}, ctx)
     assert result.is_error is True
+
+
+def test_create_support_ticket_reuses_attachment_shared_earlier_in_chat(
+    db_session, seeded_astrologer
+):
+    # Regression: the astrologer shouldn't have to resend a photo/video just
+    # because the model didn't repeat its exact URL when raising a ticket.
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        last_attachment_url="https://x.example/screenshot.png",
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+    assert "https://x.example/screenshot.png" in result.content_for_model
+    # Raising a ticket closes out this chat thread client-side too, same as
+    # mark_issue_resolved — both are terminal actions for the conversation.
+    assert result.metadata["show_feedback"] is True
+
+
+def test_non_vip_technical_ticket_requires_evidence(db_session, seeded_astrologer, monkeypatch):
+    _force_priority(monkeypatch, priority=3)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is True
+
+
+def test_non_vip_technical_ticket_succeeds_with_evidence(
+    db_session, seeded_astrologer, monkeypatch
+):
+    _force_priority(monkeypatch, priority=3)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        last_attachment_url="https://x.example/screenshot.png",
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+
+
+def test_vip_technical_ticket_also_requires_evidence(db_session, seeded_astrologer, monkeypatch):
+    # 2026-08-13 policy update: evidence is required at every priority level
+    # now — priority only changes whether the bot analyzes/troubleshoots
+    # with it, not whether it's needed at all.
+    _force_priority(monkeypatch, priority=1)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is True
+
+
+def test_vip_technical_ticket_succeeds_with_evidence(db_session, seeded_astrologer, monkeypatch):
+    _force_priority(monkeypatch, priority=1)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        last_attachment_url="https://x.example/screenshot.png",
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+
+
+def test_analyze_screenshot_without_any_image_errors_cleanly(db_session):
+    ctx = make_ctx(db_session)
+    result = executor.execute("analyze_screenshot", {"question": "what's wrong?"}, ctx)
+    assert result.is_error is True
+
+
+def test_mark_issue_resolved_flags_show_feedback(db_session, seeded_astrologer):
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        session_id="sess-feedback",
+    )
+
+    result = executor.execute(
+        "mark_issue_resolved", {"category": "technical", "sub_category": "app_crash"}, ctx
+    )
+
+    assert result.is_error is False
+    assert result.metadata == {"show_feedback": True}
+
+
+def test_orchestrator_surfaces_tool_metadata_on_the_turn_result(db_session, seeded_astrologer):
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        session_id="sess-feedback-2",
+    )
+    fake_client = FakeAgentClient(
+        [
+            tool_call_response(
+                "mark_issue_resolved", {"category": "technical", "sub_category": "app_crash"}
+            ),
+            text_response("Glad that helped!"),
+        ]
+    )
+
+    result = run_chat_turn(fake_client, ctx, "Yes that fixed it")
+
+    assert result.reply == "Glad that helped!"
+    assert result.metadata == {"show_feedback": True}
 
 
 def test_orchestrator_stops_at_max_iterations(db_session):

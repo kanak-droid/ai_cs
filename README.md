@@ -70,21 +70,19 @@ Env vars (`backend/.env`, see `.env.example` for the full list with defaults):
 | Var | Purpose |
 |---|---|
 | `DATABASE_URL` / `TEST_DATABASE_URL` | Postgres connection strings |
-| `JWT_SECRET` | Shared HS256 secret. The real AstroLokal backend signs astrologer JWTs with this; this service only verifies them. Admin JWTs are also signed with it, but carry a `role: "admin"` claim astrologer tokens never have, so the two can't be cross-presented. |
+| `JWT_SECRET` | Admin-login tokens only — signed and verified entirely by us. The astrologer side has no signing at all: the main AstroLokal app hands off a plain `user_id` in the webview URL, resolved directly against `astrologers.user_id`. |
 | `GEMINI_API_KEY` | Required for `/api/chat` to actually reach Gemini. Without it (or with a placeholder), the endpoint returns a graceful 500 (`{"detail": "Something went wrong..."}`) — everything else in the app works fine without it. |
 | `GEMINI_MODEL` | Defaults to `gemini-flash-latest` (Google's rolling alias for its current fast/cheap model — the dated `gemini-2.5-flash` snapshot has since been retired for new API keys) |
 | `MOCK_MODE` | Gates every file in `integrations/` — see "Mocked integrations" below |
 | `N8N_BEAUTIFY_WEBHOOK_URL`, `SLACK_WEBHOOK_URL` | Real endpoints to call once `MOCK_MODE=false` |
 | `CORS_ORIGINS` | Comma-separated list of frontend origins allowed to call the API |
 
-Minting a local astrologer session token (no real AstroLokal backend to issue one locally):
-
-```bash
-python -m scripts.mint_dev_token --astrologer-id 1 --name "Priya Sharma" --language Hindi
-```
-
-Prints a signed JWT and a ready-to-open webview URL
-(`http://localhost:5173/?token=<JWT>`).
+Opening the chat webview locally: there's no token to mint — the astrologer
+side isn't signed at all. Just open
+`http://localhost:5173/?user_id=<astrologer's user_id>`. `scripts/seed.py`
+gives each seeded astrologer a placeholder user_id (90001–90006, printed when
+it runs) for exactly this purpose; a real, linked astrologer's actual
+`user_id` (from the priority-ranking sync) works the same way.
 
 Seeded admin login: `ananya@astrolokal.example` / `astrohelp123` (also `vikram@...` and
 `meera@...`, same password — see `backend/scripts/seed.py`).
@@ -113,7 +111,7 @@ Both point at `VITE_API_BASE_URL=http://localhost:8000` by default.
 
 ## End-to-end flow to try
 
-1. Mint a token for astrologer 1, open `http://localhost:5173/?token=<JWT>`.
+1. Open `http://localhost:5173/?user_id=90001` (seeded astrologer Priya Sharma).
 2. Ask "when is my payout coming?" — the agent calls `get_payout_status` and answers from real
    (seeded) data, with a subtle "Checked your payout status" line above the reply. *(Requires
    `GEMINI_API_KEY` to be set to a real key — see above.)*

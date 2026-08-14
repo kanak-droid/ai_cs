@@ -20,4 +20,4 @@ def login(body: AdminLoginRequest, db: Session = Depends(get_db)) -> AdminLoginR
 
 @router.get("/api/admin/me", response_model=AdminMeResponse)
 def me(admin: AdminContext = Depends(get_current_admin)) -> AdminMeResponse:
-    return AdminMeResponse(admin_id=admin.admin_id, email=admin.email)
+    return AdminMeResponse(admin_id=admin.admin_id, email=admin.email, access_level=admin.access_level)

@@ -2,13 +2,18 @@ import { ApiError } from "./http-error";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-// Set once, by session/useAstrologerSession.ts, from the token in the initial
-// load URL. Held only in memory for the life of the tab — never localStorage,
-// never cookies (WebView storage behavior is unreliable across platforms).
+// Set once, by session/useAstrologerSession.ts, from the plain user_id in the
+// initial load URL (there's no signed token to hold here). Held only in
+// memory for the life of the tab — never localStorage, never cookies (WebView
+// storage behavior is unreliable across platforms).
 let authToken: string | null = null;
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
 }
 
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };

@@ -1,3 +1,4 @@
+import type { AdminAccessLevel } from "@astrohelp/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, type ReactNode } from "react";
 
@@ -7,6 +8,7 @@ import { authStorage } from "./authStorage";
 interface AdminIdentity {
   adminId: number;
   email: string;
+  accessLevel: AdminAccessLevel;
 }
 
 interface AuthContextValue {
@@ -25,8 +27,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { data: admin, isLoading } = useQuery<AdminIdentity | null>({
     queryKey: ["admin", "me"],
     queryFn: async () => {
-      const me = await api.get<{ admin_id: number; email: string }>("/api/admin/me");
-      return { adminId: me.admin_id, email: me.email };
+      const me = await api.get<{ admin_id: number; email: string; access_level: AdminAccessLevel }>(
+        "/api/admin/me",
+      );
+      return { adminId: me.admin_id, email: me.email, accessLevel: me.access_level };
     },
     enabled: hasToken,
     retry: false,

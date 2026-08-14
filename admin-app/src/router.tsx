@@ -1,7 +1,11 @@
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
 import { RequireAuth } from "./auth/RequireAuth";
+import { AdminsPage } from "./features/admins/pages/AdminsPage";
+import { AnalyticsPage } from "./features/analytics/pages/AnalyticsPage";
 import { LoginPage } from "./features/auth/pages/LoginPage";
+import { EmailLogPage } from "./features/emailLog/pages/EmailLogPage";
+import { SheetsSyncPage } from "./features/sheetsSync/pages/SheetsSyncPage";
 import { SlackLogPage } from "./features/slackLog/pages/SlackLogPage";
 import { TicketDetailPage } from "./features/tickets/pages/TicketDetailPage";
 import { TicketQueuePage } from "./features/tickets/pages/TicketQueuePage";
@@ -36,6 +40,46 @@ const router = createBrowserRouter([
       <RequireAuth>
         <AppShell>
           <SlackLogPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/analytics",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <AnalyticsPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/email-log",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <EmailLogPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/sheets-sync",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <SheetsSyncPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/admins",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <AdminsPage />
         </AppShell>
       </RequireAuth>
     ),

@@ -29,7 +29,11 @@ export function ChatComposer({ disabled, onSend }: ChatComposerProps) {
     <form onSubmit={handleSubmit} className="border-t border-night/10 bg-white p-3">
       {attachment && (
         <div className="mb-2 flex items-center gap-2 rounded-lg bg-cream px-2 py-1.5">
-          <img src={attachment.previewUrl} alt="" className="h-10 w-10 rounded object-cover" />
+          {attachment.file.type.startsWith("video/") ? (
+            <video src={attachment.previewUrl} className="h-10 w-10 rounded object-cover" />
+          ) : (
+            <img src={attachment.previewUrl} alt="" className="h-10 w-10 rounded object-cover" />
+          )}
           <span className="flex-1 truncate text-xs text-night/60">{attachment.file.name}</span>
           <button
             type="button"

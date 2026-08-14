@@ -3,6 +3,20 @@ import { useNavigate } from "react-router-dom";
 
 import { TicketStatusBadge } from "./TicketStatusBadge";
 
+function PriorityBadge({ priority }: { priority: number | null }) {
+  if (priority === null) return <span className="text-xs text-night/30">—</span>;
+  const isVip = priority <= 2;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+        isVip ? "bg-clay-100 text-clay-700" : "bg-slate-100 text-slate-600"
+      }`}
+    >
+      P{priority}
+    </span>
+  );
+}
+
 export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
   const navigate = useNavigate();
 
@@ -13,6 +27,7 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
           <tr className="border-b border-night/10 text-xs uppercase tracking-wide text-night/40">
             <th className="px-4 py-3 font-medium">Astrologer</th>
             <th className="px-4 py-3 font-medium">Issue</th>
+            <th className="px-4 py-3 font-medium">Priority</th>
             <th className="px-4 py-3 font-medium">Status</th>
             <th className="px-4 py-3 font-medium">Created</th>
           </tr>
@@ -35,6 +50,9 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
               <td className="px-4 py-3">
                 <p className="capitalize text-night">{ticket.category.replace(/_/g, " ")}</p>
                 <p className="max-w-xs truncate text-xs text-night/50">{ticket.description_en}</p>
+              </td>
+              <td className="px-4 py-3">
+                <PriorityBadge priority={ticket.astrologer.priority} />
               </td>
               <td className="px-4 py-3">
                 <TicketStatusBadge status={ticket.status} />

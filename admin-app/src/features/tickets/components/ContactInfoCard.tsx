@@ -7,6 +7,12 @@ export function ContactInfoCard({ astrologer }: { astrologer: Astrologer }) {
       <p className="text-sm font-medium text-night">{astrologer.name}</p>
       <p className="text-sm text-night/60">{astrologer.phone}</p>
       <p className="text-xs text-night/40">Prefers {astrologer.language}</p>
+      {astrologer.priority !== null && (
+        <p className="text-xs text-night/40">
+          Priority P{astrologer.priority}
+          {astrologer.priority <= 2 ? " (VIP)" : ""}
+        </p>
+      )}
       <p className="mt-1 text-xs text-night/30">ID #{astrologer.id}</p>
     </div>
   );

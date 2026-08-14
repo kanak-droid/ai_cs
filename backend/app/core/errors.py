@@ -12,5 +12,9 @@ class NotFoundError(AppError):
     status_code = 404
 
 
+class ForbiddenError(AppError):
+    status_code = 403
+
+
 class ValidationAppError(AppError):
     status_code = 422

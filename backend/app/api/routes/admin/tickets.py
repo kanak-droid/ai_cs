@@ -17,7 +17,7 @@ router = APIRouter(tags=["admin"])
 def list_tickets(
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
     assigned_admin_id: int | None = Query(default=None),
-    sort: Literal["asc", "desc"] = Query(default="desc"),
+    sort: Literal["asc", "desc", "priority"] = Query(default="desc"),
     admin: AdminContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> list[AdminTicketRead]:
@@ -25,8 +25,9 @@ def list_tickets(
         db,
         status=status_filter,
         assigned_admin_id=assigned_admin_id,
-        sort_desc=(sort == "desc"),
+        sort=sort,
     )
+    ticket_service.attach_astrologer_priority(db, tickets)
     return [AdminTicketRead.model_validate(t) for t in tickets]
 
 
@@ -37,6 +38,7 @@ def get_ticket(
     db: Session = Depends(get_db),
 ) -> AdminTicketRead:
     ticket = ticket_service.get_ticket(db, ticket_id)
+    ticket_service.attach_astrologer_priority(db, [ticket])
     return AdminTicketRead.model_validate(ticket)
 
 
@@ -51,4 +53,5 @@ def update_ticket_status(
     ticket = ticket_service.transition_status(
         db, ticket, body.status, changed_by=admin.email, note=body.note
     )
+    ticket_service.attach_astrologer_priority(db, [ticket])
     return AdminTicketRead.model_validate(ticket)

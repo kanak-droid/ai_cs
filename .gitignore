@@ -29,6 +29,7 @@ backend/*.egg-info/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+.claude/
 
 # Logs
 *.log
@@ -36,3 +37,9 @@ npm-debug.log*
 
 # Docker
 postgres-data/
+
+# Uploaded astrologer attachments (local disk storage, dev-only)
+backend/uploads/
+
+# Google service-account credentials (Sheets sync) — never committed
+backend/credentials/

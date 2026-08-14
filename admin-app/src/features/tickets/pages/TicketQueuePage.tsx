@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 
+import { useAuth } from "../../../auth/AuthContext";
 import { EmptyState } from "../../../components/EmptyState";
 import { Spinner } from "../../../components/Spinner";
 import { useTicketQueue } from "../api/useTicketQueue";
@@ -8,12 +9,21 @@ import { TicketQueueTable } from "../components/TicketQueueTable";
 
 export function TicketQueuePage() {
   const [searchParams] = useSearchParams();
+  const { admin } = useAuth();
+
+  // Absent param -> default to "my tickets". Explicit "all" -> unfiltered.
+  const assignedParam = searchParams.get("assigned_admin_id");
+  const assignedAdminId =
+    assignedParam === "all"
+      ? undefined
+      : assignedParam
+        ? Number(assignedParam)
+        : admin?.adminId;
+
   const filters = {
     status: searchParams.get("status") ?? undefined,
-    assignedAdminId: searchParams.get("assigned_admin_id")
-      ? Number(searchParams.get("assigned_admin_id"))
-      : undefined,
-    sort: (searchParams.get("sort") as "asc" | "desc") ?? "desc",
+    assignedAdminId,
+    sort: (searchParams.get("sort") as "asc" | "desc" | "priority") ?? "desc",
   };
 
   const { data: tickets, status } = useTicketQueue(filters);

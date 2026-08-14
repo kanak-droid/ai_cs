@@ -49,21 +49,10 @@ def test_get_ticket_not_owned_by_astrologer_returns_404(
         preferred_language="English",
     )
 
-    import jwt
-
-    from app.core.config import settings
-
-    token = jwt.encode(
-        {
-            "astrologer_id": seeded_astrologer.id,
-            "name": seeded_astrologer.name,
-            "language": seeded_astrologer.language,
-        },
-        settings.JWT_SECRET,
-        algorithm=settings.ASTROLOGER_TOKEN_ALGORITHM,
+    response = client.get(
+        f"/api/tickets/{ticket.id}",
+        headers={"Authorization": f"Bearer {seeded_astrologer.user_id}"},
     )
-
-    response = client.get(f"/api/tickets/{ticket.id}", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 404
 
 

@@ -12,7 +12,7 @@ directly to the google.genai `types` module, which is the AI provider's wire
 format, not a business-logic dependency.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from google.genai import types
 
@@ -29,6 +29,10 @@ MAX_ITERATIONS = 8
 class ChatTurnResult:
     reply: str
     trace: list[AgentTraceStep]
+    # Merged from every tool call's ToolResult.metadata this turn (last write
+    # wins on key collision) — e.g. created_ticket_id, show_feedback. Never
+    # seen by the model; chat_service/routes map this onto ChatResponse.
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ def run_chat_turn(
     ]
     contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
     trace = AgentTrace()
+    metadata: dict = {}
 
     for _ in range(MAX_ITERATIONS):
         response = client.generate(system=system, contents=contents, tools=tools)
@@ -87,6 +92,7 @@ def run_chat_turn(
             return ChatTurnResult(
                 reply="Sorry, I couldn't process that — could you try again?",
                 trace=trace.to_list(),
+                metadata=metadata,
             )
 
         model_content = response.candidates[0].content
@@ -96,13 +102,14 @@ def run_chat_turn(
         function_call_parts = [p for p in parts if p.function_call is not None]
         if not function_call_parts:
             final_text = "".join(p.text for p in parts if p.text is not None)
-            return ChatTurnResult(reply=final_text, trace=trace.to_list())
+            return ChatTurnResult(reply=final_text, trace=trace.to_list(), metadata=metadata)
 
         response_parts = []
         for part in function_call_parts:
             call = part.function_call
             result = executor.execute(call.name, dict(call.args or {}), ctx)
             trace.add(tool=call.name, ok=not result.is_error, summary=result.summary_for_trace)
+            metadata.update(result.metadata)
             response_parts.append(
                 types.Part.from_function_response(
                     name=call.name, response={"result": result.content_for_model}
@@ -117,4 +124,5 @@ def run_chat_turn(
     return ChatTurnResult(
         reply="I've had to pause here — could you try rephrasing your question?",
         trace=trace.to_list(),
+        metadata=metadata,
     )

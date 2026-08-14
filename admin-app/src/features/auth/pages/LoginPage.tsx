@@ -27,8 +27,9 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-cream px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="font-display text-3xl font-semibold text-night">AstroHelp</h1>
-        <p className="mt-1 text-sm text-night/50">Admin sign in</p>
+        <img src="/astrolokal-logo.png" alt="" className="mb-4 h-12 w-12" />
+        <h1 className="font-display text-3xl font-semibold text-night">AstroLokal</h1>
+        <p className="mt-1 text-sm text-night/50">Support admin sign in</p>
 
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
@@ -62,6 +63,10 @@ export function LoginPage() {
             {login.isPending ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+
+        <p className="mt-4 text-center text-sm text-night/50">
+          No account? Ask an admin to add your email from the Admins page.
+        </p>
       </div>
     </div>
   );

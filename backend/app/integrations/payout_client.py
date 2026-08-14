@@ -1,25 +1,65 @@
-# MOCKED — replace with real API call.
+# MOCKED — but only for astrologers with no linked expert_id.
 #
-# Real integration: this would call AstroLokal's payments service, e.g.
-#   GET {PAYOUTS_API_URL}/astrologers/{astrologer_id}/payout-status
-# and return its response shape instead of the fabricated PayoutStatus below.
-# Nothing outside this file needs to change to make that swap.
+# Astrologers whose `expert_id` is set and has a synced row in
+# sheet_payout_status (see app/services/sheets_sync_service.py) get their
+# REAL current-cycle payout status instead of a fabricated one — this is the
+# actual, no-longer-mocked path for anyone ops has linked.
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from sqlalchemy.orm import Session
+
 from app.integrations.config import MOCK_MODE
+from app.models.astrologer import Astrologer
+from app.models.sheet_sync import SheetPayoutStatus
 
 
 @dataclass(frozen=True)
 class PayoutStatus:
     astrologer_id: int
-    status: str  # "scheduled" | "processing" | "paid" | "on_hold"
+    status: str  # "scheduled" | "processing" | "paid" | "on_hold" | (real) "processed" etc.
     amount_inr: int
     scheduled_date: str
     last_paid_date: str
+    wallet_balance_inr: int | None = None
+    # This cycle's KYC status ("YES"/"NO") and the TDS percent/amount
+    # actually deducted — straight from the payout sheet, not guessed.
+    # Incomplete KYC means a much higher TDS rate (~20% vs ~1%), the most
+    # common reason a payout looks lower than expected — see prompt.py.
+    kyc_status: str | None = None
+    tds_deducted_percent: str | None = None
+    tds_amount_inr: int | None = None
 
 
-def get_payout_status(astrologer_id: int) -> PayoutStatus:
+def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> PayoutStatus | None:
+    synced = db.get(SheetPayoutStatus, expert_id)
+    if synced is None:
+        return None
+    return PayoutStatus(
+        astrologer_id=astrologer_id,
+        status=synced.status or "unknown",
+        amount_inr=synced.total_after_tax or 0,
+        # The sheet only tracks cycles already processed — there's no real
+        # forward-looking schedule to report. Saying so explicitly, rather
+        # than reusing last_paid_date here, is what stops the model from
+        # inventing a plausible-but-fake next date (verified live: it did,
+        # from a duplicate value that didn't even make sense as a schedule).
+        scheduled_date="not tracked — only past processed cycles are available",
+        last_paid_date=synced.processed_at or "unknown",
+        wallet_balance_inr=synced.wallet_balance,
+        kyc_status=synced.kyc_status,
+        tds_deducted_percent=synced.tds_deducted_percent,
+        tds_amount_inr=synced.tds_amount,
+    )
+
+
+def get_payout_status(db: Session, astrologer_id: int) -> PayoutStatus:
+    astrologer = db.get(Astrologer, astrologer_id)
+    if astrologer and astrologer.expert_id:
+        real = _real_payout_status(db, astrologer_id, astrologer.expert_id)
+        if real is not None:
+            return real
+
     if not MOCK_MODE:
         raise NotImplementedError("Real payout integration is not wired up yet.")
 

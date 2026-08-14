@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import utcnow
@@ -22,6 +22,23 @@ class Astrologer(Base):
     assigned_admin_id: Mapped[int | None] = mapped_column(
         ForeignKey("admins.id"), nullable=True
     )
+
+    # Join key into the ops team's Google Sheets (roster/KYC/payout/performance)
+    # — see app/services/sheets_sync_service.py. Nullable: most seeded test
+    # astrologers have no real counterpart in those sheets.
+    expert_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
+
+    # The real AstroLokal platform's user id — confirmed 2026-08-14 as what
+    # the astrologer's real JWT is actually keyed by when the main app hands
+    # off to this chat webview (not expert_id, and not our own `id` above —
+    # both of those are internal to us). Backfilled from the priority-ranking
+    # sync (see sheets_sync_service._sync_astrologer_profiles), which now
+    # also carries user_id per expert_id. Not yet used to resolve a real
+    # token's identity — decode_astrologer_token still only knows our own
+    # `id`, via the local-dev scripts/mint_dev_token.py convention — but this
+    # is the column to match against once the real token's exact claim shape
+    # is confirmed.
+    user_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
 
     # Mocked payout/KYC/salary fields — for now these merely seed the mocked
     # integration clients with per-astrologer values; a real integration would

@@ -15,9 +15,14 @@ export interface ChatRequest {
   // requests, so without this the model has no memory of anything said
   // earlier in the chat.
   history: ChatHistoryTurn[];
+  // One per webview visit (client-generated) — analytics-only, identifies
+  // this conversation's ChatSession row.
+  session_id?: string;
 }
 
 export interface ChatResponse {
   reply: string;
   trace: ChatTraceStep[];
+  created_ticket_id: number | null;
+  show_feedback: boolean;
 }

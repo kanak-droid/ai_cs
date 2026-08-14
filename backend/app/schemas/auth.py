@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr
 
+from app.models.enums import AdminAccessLevel
+
 
 class VerifyResponse(BaseModel):
     astrologer_id: int
@@ -22,3 +24,4 @@ class AdminLoginResponse(BaseModel):
 class AdminMeResponse(BaseModel):
     admin_id: int
     email: str
+    access_level: AdminAccessLevel

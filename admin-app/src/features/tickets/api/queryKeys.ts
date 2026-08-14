@@ -1,7 +1,7 @@
 export interface TicketQueueFilters {
   status?: string;
   assignedAdminId?: number;
-  sort: "asc" | "desc";
+  sort: "asc" | "desc" | "priority";
 }
 
 export const ticketsKeys = {

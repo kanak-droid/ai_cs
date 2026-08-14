@@ -21,9 +21,10 @@ def get_db() -> Generator[Session, None, None]:
 
 def get_current_astrologer(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> AstrologerContext:
     try:
-        return auth_service.verify_astrologer_token(credentials.credentials)
+        return auth_service.verify_astrologer_session(db, credentials.credentials)
     except InvalidTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session"
@@ -39,3 +40,11 @@ def get_current_admin(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired admin session"
         ) from exc
+
+
+def require_admin_access(admin: AdminContext = Depends(get_current_admin)) -> AdminContext:
+    """Gate for roster-management endpoints — granting/editing another
+    admin's access is itself an ADMIN-access-level action."""
+    if admin.access_level != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return admin

@@ -26,7 +26,12 @@ class TicketRead(BaseModel):
     preferred_language: str
     attachment_url: str | None = None
     assigned_admin_id: int | None = None
+    assigned_cs_id: int | None = None
+    kam_notified: bool
+    cs_notified: bool
     status: TicketStatus
+    resolved_at: datetime | None = None
+    satisfaction: str | None = None
     created_at: datetime
     updated_at: datetime
     history: list[TicketStatusHistoryRead] = []
@@ -35,3 +40,7 @@ class TicketRead(BaseModel):
 class TicketStatusUpdateRequest(BaseModel):
     status: TicketStatus
     note: str | None = None
+
+
+class TicketSatisfactionRequest(BaseModel):
+    satisfied: bool

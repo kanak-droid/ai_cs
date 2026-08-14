@@ -15,8 +15,12 @@ def chat(
     astrologer: AstrologerContext = Depends(get_current_astrologer),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
-    result = chat_service.handle_chat_turn(db, astrologer, body.message, history=body.history)
+    result = chat_service.handle_chat_turn(
+        db, astrologer, body.message, history=body.history, session_id=body.session_id
+    )
     return ChatResponse(
         reply=result.reply,
         trace=[ChatTraceStep(tool=s.tool, ok=s.ok, summary=s.summary) for s in result.trace],
+        created_ticket_id=result.metadata.get("created_ticket_id"),
+        show_feedback=result.metadata.get("show_feedback", False),
     )

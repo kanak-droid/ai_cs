@@ -1,0 +1,9 @@
+# Used by the two frontend Dockerfiles (admin-app/Dockerfile, chat-app/Dockerfile),
+# which build from the repo root so npm workspaces can resolve packages/shared.
+node_modules/
+*/node_modules/
+backend/
+.git/
+.claude/
+**/dist/
+**/.venv/

@@ -5,7 +5,7 @@ import { sendChatMessage } from "./chatApi";
 
 export function useSendMessage() {
   return useMutation({
-    mutationFn: (vars: { message: string; history: ChatHistoryTurn[] }) =>
-      sendChatMessage(vars.message, vars.history),
+    mutationFn: (vars: { message: string; history: ChatHistoryTurn[]; sessionId: string }) =>
+      sendChatMessage(vars.message, vars.history, vars.sessionId),
   });
 }

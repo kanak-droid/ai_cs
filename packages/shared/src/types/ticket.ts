@@ -23,7 +23,12 @@ export interface Ticket {
   preferred_language: string;
   attachment_url: string | null;
   assigned_admin_id: number | null;
+  assigned_cs_id: number | null;
+  kam_notified: boolean;
+  cs_notified: boolean;
   status: TicketStatus;
+  resolved_at: string | null;
+  satisfaction: "satisfied" | "unsatisfied" | null;
   created_at: string;
   updated_at: string;
   history: TicketStatusHistoryEntry[];

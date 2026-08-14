@@ -20,7 +20,7 @@ export function PhotoUploadButton({ onSelect, disabled }: PhotoUploadButtonProps
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         className="hidden"
         onChange={handleChange}
         aria-hidden="true"
@@ -30,7 +30,7 @@ export function PhotoUploadButton({ onSelect, disabled }: PhotoUploadButtonProps
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
-        aria-label="Attach a photo"
+        aria-label="Attach a photo or video"
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-night/60 transition-colors hover:bg-night/5 disabled:opacity-40"
       >
         <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
