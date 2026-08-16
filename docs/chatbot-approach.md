@@ -482,6 +482,143 @@ OR `assigned_cs_id == X AND cs_notified`. Existing tickets were backfilled
 to `true` for both (preserves current visibility for old data; only new
 tickets get the refined gating).
 
+### 7d. "Fewer calls" gets concrete advice, not just generic suggestions (2026-08-16)
+
+§7b's "P3+ get generic suggestions" for `no_visibility` was genuinely
+generic (check availability toggle, profile/KYC complete, active hours) —
+didn't explain *why* those things matter or connect them to the priority
+system driving call volume. Replaced with three specific, actionable
+behaviors tied directly to what `get_priority_ranking` measures (talktime,
+connections): stay available especially at peak hours, get regular
+customers to call more often, keep each call engaged for longer. The model
+now explicitly tells the astrologer these raise their priority tier over
+time, which is what brings more calls — and that a low tier by itself isn't
+a fault worth a ticket.
+
+Live-testing this against real astrologers (not just reading the prompt)
+caught two real bugs, both fixed same-day:
+
+1. **P1/P2 narrated the ticket instead of raising it.** The model would
+   reply "I'm raising a ticket for this now" with `create_support_ticket`
+   never actually called that turn (`created_ticket_id: null`) — reproduced
+   consistently across repeated identical requests, not a one-off. This is
+   exactly the failure §6a's anti-hallucination rule warns about elsewhere
+   in the prompt, but that general rule alone wasn't enough to stop it
+   here — fixed by adding an explicit, local instruction: call the tool in
+   THIS SAME response before saying anything about it being done. Verified
+   fixed across 3 repeated live requests after the change.
+2. **P3+ escalated anyway when their raw stats looked inconsistent with
+   their tier.** A P5 astrologer with unusually high `users_connected`/
+   `total_talktime_min` (278 connections, 3090 min) got a ticket raised
+   immediately — the model reasoned "these numbers are already high, yet
+   tier is still lowest, something must be broken," overriding the
+   tier-only branching §7b describes. A same-tier astrologer with much
+   lower stats (12 connections, 104 min) correctly got the self-help
+   advice — same tier, different raw stats, different (wrong) behavior for
+   one of them. Fixed by explicitly telling the model the branch decision
+   is based ONLY on the tier number, never on how the other stats look,
+   since a mismatch between them is expected and not itself evidence of a
+   bug. Verified fixed across 3 repeated live requests for the same
+   astrologer that originally triggered it.
+
+Neither bug is specific to this feature — both are instances of the model
+not reliably following an instruction that was stated only once, generally,
+elsewhere in the prompt. The fix pattern in both cases was the same: restate
+the constraint locally, right where the model is about to violate it, rather
+than trusting a single general statement to be recalled at the right moment.
+
+**Even after both prompt fixes above, the same bug (#2's shape) recurred in
+real usage** — a real click-through in the actual webview raised a ticket
+immediately for a P5 astrologer's very first message, complete with the
+model falsely telling them "I have notified your KAM directly" (checked the
+actual `SlackLog` row: it went to the shared channel, `kam_notified=False`
+— the *routing* stayed correct since that's code-enforced, only the
+model's own claim to the astrologer was wrong). This confirms prompt
+wording alone cannot guarantee 0% failure — it only lowers the rate, since
+instruction-following isn't deterministic.
+
+Added a genuine code-level gate for this one (2026-08-16), the same pattern
+§7b's evidence requirement already uses: `SessionContext.has_prior_reply`
+(`app/agent/context.py`) is a purely mechanical fact — does this
+conversation's client-supplied `history` already contain at least one
+assistant turn? — computed in `chat_service.handle_chat_turn`, not
+reported by the model. `tool_registry._handle_create_support_ticket` now
+refuses (`is_error=True`) a non-VIP `no_visibility` ticket when
+`has_prior_reply` is false, regardless of what the model decides: the very
+first message about low calls can't reach a ticket for a non-VIP
+astrologer, full stop — forcing at least one self-help reply before
+escalation is even possible. VIP (P1/P2) is unaffected, still escalates on
+the first message. Verified live: repeated the exact real-world failure
+(Mani, P5, fresh conversation) and got the self-help reply with no ticket
+every time the Gemini call itself succeeded (one run hit the free-tier rate
+limit mid-test — unrelated, not a code failure). Unit-tested in
+`test_agent_tool_selection.py` (gate blocks/allows correctly) and
+`test_chat_route.py` (the `history` field actually threads through end to
+end, not just the isolated tool call).
+
+### 7e. No duplicate ticket for the same still-open problem (2026-08-16)
+
+An astrologer coming back about an issue they already raised a ticket for
+(still open) used to just get a second ticket created — no check existed at
+all. Given §7d's lesson that a prompt instruction alone isn't reliable
+enough for something this deterministic, this one went straight to a
+code-level gate rather than trying a prompt-only version first:
+`ticket_service.get_active_ticket_for_category(db, astrologer_id, category)`
+looks up the most recent ticket for this astrologer+category that isn't
+`resolved`/`closed` yet; `tool_registry._handle_create_support_ticket`
+refuses (`is_error=True`) if one exists, checked first — before the
+evidence requirement, since there's no point asking for a fresh photo for a
+duplicate that shouldn't be created at all. The tool's error message tells
+the model the existing ticket's id/status and to point the astrologer at
+"My Tickets" (bottom right) instead of retrying. "Same problem" is matched
+on `category` only (not `sub_category`) — the same granularity the rest of
+the priority/evidence/routing logic already uses.
+
+Verified live end-to-end: raised a real `phone_change` ticket for a test
+astrologer, then — in a fresh conversation, with realistic history simulating
+the model asking its usual follow-up questions — brought up the same request
+again. `create_support_ticket` was actually called and refused
+(`ok: false` in the trace, `created_ticket_id` stayed null), and the reply
+correctly named the existing ticket number and pointed to My Tickets,
+without asking the astrologer to describe the issue again. Unit-tested in
+`test_ticket_service.py` (the lookup itself: finds an open one, ignores
+resolved/closed, ignores a different category, ignores a different
+astrologer) and `test_agent_tool_selection.py` (the gate blocks a duplicate,
+and allows a new ticket once the earlier one is actually resolved+closed).
+
+### 7f. Naming the real KAM/CS in the confirmation, not just "an agent" (2026-08-16)
+
+The ticket-raised confirmation previously said only "one of our agents will
+work on it" — no name, since neither `create_support_ticket`'s result nor
+`get_assigned_admin` ever gave the model an actual admin name, only a raw
+`assigned_admin_id`/`assigned_cs_id` (get_assigned_admin returned just the
+id — unusable for "who is my point of contact," the exact question it
+exists to answer). Fixed both: `_handle_get_assigned_admin` now looks up
+and returns `assigned_admin_name`; `_handle_create_support_ticket` returns
+`notified_kam_name`/`notified_cs_name` alongside the ticket JSON, computed
+from the SAME `kam_notified`/`cs_notified` flags §7b/§7c already use for
+Slack routing — deliberately NOT just "whoever is nominally assigned,"
+since a standard non-VIP ticket still has a personal KAM on
+`assigned_admin_id` who was never actually paged for it; naming them would
+overclaim who's actually looking at it. Either field is `None` when that
+contact wasn't actually notified — the prompt is explicit that `None` means
+don't name anyone, never invent a name to fill the gap.
+
+The prompt's escalation-confirmation instructions now say: name whichever
+contact actually comes back non-null, and reassure the astrologer that
+person will reach out very soon if the issue is genuine and get it sorted
+out quickly.
+
+Verified live across all three routing shapes, checking the DB after each
+to confirm the named person matches who was actually notified: a
+"profile" (photo change, always-direct-to-KAM) ticket correctly named the
+real KAM ("sent it directly to Jyothiprakash"); a standard non-VIP
+`technical` ticket correctly named the CS instead ("forwarded it to Ramya
+in customer support") since CS, not KAM, was the one actually notified for
+that routing shape; a VIP astrologer's ticket (mock priority happened to
+land VIP) correctly named the KAM. No case named an unnotified contact.
+Unit-tested in `test_agent_tool_selection.py`.
+
 ## 8. Mocked integrations, and how each becomes real
 
 Every file in `backend/app/integrations/` is gated by `MOCK_MODE` and starts

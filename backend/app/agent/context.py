@@ -19,6 +19,16 @@ class SessionContext:
     session_id identifies this webview visit for analytics only (see
     app.services.chat_session_service) — optional, and never used for
     anything astrologer/ticket flows depend on.
+
+    has_prior_reply is True once this conversation already has at least one
+    assistant turn behind it (see chat_service) — a purely mechanical fact
+    about the conversation's shape, computed from the client-supplied
+    history, not something the model reports about itself. Used to gate
+    premature escalation (e.g. a non-VIP "no_visibility" ticket — see
+    tool_registry) deterministically in code: the prompt alone can't be
+    trusted to reliably wait for a first round of self-help advice before
+    raising a ticket, since instruction-following isn't 100% reliable
+    (observed live, 2026-08-16 — see docs/chatbot-approach.md §7d).
     """
 
     astrologer_id: int
@@ -27,3 +37,4 @@ class SessionContext:
     db: Session
     last_attachment_url: str | None = None
     session_id: str | None = None
+    has_prior_reply: bool = False

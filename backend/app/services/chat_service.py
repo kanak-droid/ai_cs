@@ -44,6 +44,7 @@ def handle_chat_turn(
         db=db,
         last_attachment_url=_find_last_attachment_url(message, history),
         session_id=session_id,
+        has_prior_reply=any(turn.role == "assistant" for turn in history),
     )
     agent_history = [HistoryTurn(role=turn.role, text=turn.text) for turn in history]
     result = run_chat_turn(client or get_agent_client(), ctx, message, history=agent_history)

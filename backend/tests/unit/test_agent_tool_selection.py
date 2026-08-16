@@ -256,6 +256,223 @@ def test_vip_technical_ticket_succeeds_with_evidence(db_session, seeded_astrolog
     assert result.is_error is False
 
 
+def test_create_support_ticket_refuses_a_duplicate_for_an_open_ticket(
+    db_session, seeded_astrologer
+):
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+    first = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+            "attachment_url": "https://x.example/screenshot.png",
+        },
+        ctx,
+    )
+    assert first.is_error is False
+
+    second = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "Still crashing.",
+            "description_en": "Still crashing.",
+            "attachment_url": "https://x.example/screenshot2.png",
+        },
+        ctx,
+    )
+
+    assert second.is_error is True
+    assert "already" in second.content_for_model.lower()
+
+
+def test_create_support_ticket_allows_a_new_ticket_after_the_first_resolves(
+    db_session, seeded_astrologer
+):
+    from app.models.enums import TicketStatus
+    from app.services import ticket_service
+
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+    first = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+            "attachment_url": "https://x.example/screenshot.png",
+        },
+        ctx,
+    )
+    ticket = ticket_service.get_ticket(db_session, first.metadata["created_ticket_id"])
+    ticket_service.transition_status(db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example")
+    ticket_service.transition_status(db_session, ticket, TicketStatus.CLOSED, changed_by="admin@test.example")
+
+    second = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "Crashing again, a new issue.",
+            "description_en": "Crashing again, a new issue.",
+            "attachment_url": "https://x.example/screenshot2.png",
+        },
+        ctx,
+    )
+
+    assert second.is_error is False
+
+
+def test_create_support_ticket_names_the_kam_when_actually_notified(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # "profile" (photo change) always routes direct-to-KAM regardless of
+    # priority — the model should get the real KAM name back, not just an id.
+    _force_priority(monkeypatch, priority=5)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        last_attachment_url="https://x.example/photo.png",
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "profile",
+            "sub_category": "photo_change",
+            "description": "Wants a new profile photo.",
+            "description_en": "Wants a new profile photo.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+    assert "notified_kam_name=Test Admin" in result.content_for_model
+
+
+def test_create_support_ticket_names_no_one_for_a_standard_non_vip_ticket(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # Non-VIP + a category with no direct-to-KAM carve-out: the astrologer's
+    # personal KAM is still nominally assigned but was never actually paged,
+    # so the model must not be told a specific name (would overclaim).
+    _force_priority(monkeypatch, priority=5)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        last_attachment_url="https://x.example/screenshot.png",
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "technical",
+            "sub_category": "app_crash",
+            "description": "App crashes on login.",
+            "description_en": "App crashes on login.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+    assert "notified_kam_name=None" in result.content_for_model
+
+
+def test_get_assigned_admin_returns_the_real_name_not_just_an_id(db_session, seeded_astrologer):
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+
+    result = executor.execute("get_assigned_admin", {}, ctx)
+
+    assert result.content_for_model == "assigned_admin_name=Test Admin"
+
+
+def test_non_vip_no_visibility_ticket_requires_a_prior_reply_first(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # Code-enforced gate (2026-08-16): a non-VIP astrologer's very first
+    # message about low calls can't skip straight to a ticket, regardless of
+    # what the model decides — see tool_registry._handle_create_support_ticket.
+    _force_priority(monkeypatch, priority=5)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "no_visibility",
+            "sub_category": "low_visibility",
+            "description": "Not getting enough calls.",
+            "description_en": "Not getting enough calls.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is True
+
+
+def test_non_vip_no_visibility_ticket_succeeds_after_a_prior_reply(
+    db_session, seeded_astrologer, monkeypatch
+):
+    _force_priority(monkeypatch, priority=5)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name="Test",
+        language="English",
+        db=db_session,
+        has_prior_reply=True,
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "no_visibility",
+            "sub_category": "low_visibility",
+            "description": "Still not getting enough calls after trying the advice.",
+            "description_en": "Still not getting enough calls after trying the advice.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+
+
+def test_vip_no_visibility_ticket_succeeds_on_the_first_message(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # VIP (P1/P2) skips the self-help gate entirely — escalate immediately.
+    _force_priority(monkeypatch, priority=1)
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id, name="Test", language="English", db=db_session
+    )
+
+    result = executor.execute(
+        "create_support_ticket",
+        {
+            "category": "no_visibility",
+            "sub_category": "low_visibility",
+            "description": "Not getting enough calls.",
+            "description_en": "Not getting enough calls.",
+        },
+        ctx,
+    )
+
+    assert result.is_error is False
+
+
 def test_analyze_screenshot_without_any_image_errors_cleanly(db_session):
     ctx = make_ctx(db_session)
     result = executor.execute("analyze_screenshot", {"question": "what's wrong?"}, ctx)

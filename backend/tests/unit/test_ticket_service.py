@@ -271,6 +271,82 @@ def test_recently_resolved_ticket_does_not_auto_close(db_session, seeded_astrolo
     assert ticket.status == TicketStatus.RESOLVED
 
 
+def test_get_active_ticket_for_category_finds_an_open_ticket(db_session, seeded_astrologer):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="technical",
+        sub_category="app_crash",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    found = ticket_service.get_active_ticket_for_category(
+        db_session, seeded_astrologer.id, "technical"
+    )
+
+    assert found is not None
+    assert found.id == ticket.id
+
+
+def test_get_active_ticket_for_category_ignores_resolved_and_closed(db_session, seeded_astrologer):
+    ticket = _make_resolved_ticket(db_session, seeded_astrologer)
+    ticket_service.transition_status(db_session, ticket, TicketStatus.CLOSED, changed_by="admin@test.example")
+
+    found = ticket_service.get_active_ticket_for_category(
+        db_session, seeded_astrologer.id, "technical"
+    )
+
+    assert found is None
+
+
+def test_get_active_ticket_for_category_ignores_a_different_category(db_session, seeded_astrologer):
+    ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="technical",
+        sub_category="app_crash",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    found = ticket_service.get_active_ticket_for_category(db_session, seeded_astrologer.id, "payout")
+
+    assert found is None
+
+
+def test_get_active_ticket_for_category_ignores_a_different_astrologer(
+    db_session, seeded_astrologer, seeded_admin
+):
+    from app.models.astrologer import Astrologer
+
+    other = Astrologer(
+        name="Other Astrologer",
+        phone="+91-90000-00002",
+        language="English",
+        assigned_admin_id=seeded_admin.id,
+    )
+    db_session.add(other)
+    db_session.commit()
+    ticket_service.create_ticket(
+        db_session,
+        astrologer_id=other.id,
+        category="technical",
+        sub_category="app_crash",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    found = ticket_service.get_active_ticket_for_category(
+        db_session, seeded_astrologer.id, "technical"
+    )
+
+    assert found is None
+
+
 def test_list_all_tickets_filters_by_status_and_admin(db_session, seeded_astrologer, monkeypatch):
     # Forced VIP so kam_notified is deterministically true — this test is
     # about the status/admin filter itself, not the notified-gating logic

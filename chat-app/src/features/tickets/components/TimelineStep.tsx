@@ -4,10 +4,11 @@ interface TimelineStepProps {
   label: string;
   state: StepState;
   timestamp?: string;
+  note?: string;
   isLast: boolean;
 }
 
-export function TimelineStep({ label, state, timestamp, isLast }: TimelineStepProps) {
+export function TimelineStep({ label, state, timestamp, note, isLast }: TimelineStepProps) {
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
@@ -55,6 +56,9 @@ export function TimelineStep({ label, state, timestamp, isLast }: TimelineStepPr
               minute: "2-digit",
             })}
           </p>
+        )}
+        {note && (
+          <p className="mt-1 rounded-lg bg-cream px-2.5 py-1.5 text-sm text-ink">{note}</p>
         )}
       </div>
     </div>

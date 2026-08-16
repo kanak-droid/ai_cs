@@ -19,6 +19,7 @@ from app.integrations import (
     queue_performance_client,
     salary_client,
 )
+from app.models.admin import Admin
 from app.schemas.ticket import TicketRead
 from app.services import chat_session_service, ticket_service
 
@@ -98,8 +99,9 @@ def _handle_get_salary_details(tool_input: dict, ctx: SessionContext) -> ToolRes
 
 def _handle_get_assigned_admin(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = admin_mapping_client.get_assigned_admin(ctx.db, ctx.astrologer_id)
+    admin = ctx.db.get(Admin, result.admin_id)
     return ToolResult(
-        content_for_model=f"assigned_admin_id={result.admin_id}",
+        content_for_model=f"assigned_admin_name={admin.name if admin else None}",
         summary_for_trace="Looked up your assigned support contact",
     )
 
@@ -155,6 +157,24 @@ def _handle_create_support_ticket(tool_input: dict, ctx: SessionContext) -> Tool
     category = tool_input.get("category", "other")
     attachment_url = tool_input.get("attachment_url") or ctx.last_attachment_url
 
+    # Code-enforced (2026-08-16): never raise a second ticket for the same
+    # problem while an earlier one for this category is still open — checked
+    # first, before evidence, since there's no point asking for a fresh
+    # photo/video for a duplicate that shouldn't be created at all.
+    existing = ticket_service.get_active_ticket_for_category(ctx.db, ctx.astrologer_id, category)
+    if existing is not None:
+        return ToolResult(
+            content_for_model=(
+                f"error: astrologer already has an active ticket for this — ticket "
+                f"#{existing.id}, status '{existing.status.value}'. Do NOT create another "
+                "one. Tell them this issue is already in the queue and being worked on, "
+                'and ask them to check the "My Tickets" section (bottom right) to see its '
+                "current priority/status."
+            ),
+            summary_for_trace="Already has an active ticket for this — didn't raise a duplicate",
+            is_error=True,
+        )
+
     if ticket_service.needs_evidence(category) and not attachment_url:
         return ToolResult(
             content_for_model=(
@@ -162,6 +182,34 @@ def _handle_create_support_ticket(tool_input: dict, ctx: SessionContext) -> Tool
                 "ticket — ask the astrologer to share one first, then call this again."
             ),
             summary_for_trace="Needs a photo/video before this ticket can be raised",
+            is_error=True,
+        )
+
+    # Code-enforced, not just a prompt instruction (2026-08-16): a non-VIP
+    # "no_visibility" complaint should get self-help advice first, not an
+    # immediate ticket — the prompt says so, but the model doesn't reliably
+    # follow that instruction every time (observed live — see
+    # docs/chatbot-approach.md §7d). has_prior_reply is a mechanical fact
+    # about the conversation's shape (has this astrologer already had one
+    # round-trip in this chat?), not something the model can talk its way
+    # around — so the very first message about low calls can't skip
+    # straight to a ticket for a non-VIP astrologer, no matter what the
+    # model decides.
+    if (
+        category.strip().lower() == "no_visibility"
+        and not ctx.has_prior_reply
+        and not ticket_service.is_vip_priority(ctx.db, ctx.astrologer_id)
+    ):
+        return ToolResult(
+            content_for_model=(
+                "error: don't raise this ticket yet. This astrologer isn't VIP priority, "
+                "and this is their first message about it — give them the self-help "
+                "advice from the prompt first (availability especially at peak hours, "
+                "encouraging regular customers to call more, keeping calls engaged "
+                "longer) and explain how priority works, instead of calling this tool. "
+                "Only call it again if they come back still unsatisfied after that."
+            ),
+            summary_for_trace="Give self-help advice before raising this ticket",
             is_error=True,
         )
 
@@ -177,8 +225,27 @@ def _handle_create_support_ticket(tool_input: dict, ctx: SessionContext) -> Tool
     )
     chat_session_service.mark_escalated(ctx.db, ctx.session_id, ticket_id=ticket.id)
     ticket_read = TicketRead.model_validate(ticket)
+
+    # Real name of whoever was ACTUALLY notified (kam_notified/cs_notified —
+    # see ticket_service.create_ticket), not just whoever is nominally
+    # assigned — a standard non-VIP ticket still has a personal KAM on
+    # assigned_admin_id even though they weren't specially paged for it, so
+    # naming them here would overclaim who's actually looking at this. None
+    # means "don't name anyone" — never let the model invent a name.
+    notified_kam_name = None
+    if ticket.kam_notified and ticket.assigned_admin_id:
+        kam = ctx.db.get(Admin, ticket.assigned_admin_id)
+        notified_kam_name = kam.name if kam else None
+    notified_cs_name = None
+    if ticket.cs_notified and ticket.assigned_cs_id:
+        cs = ctx.db.get(Admin, ticket.assigned_cs_id)
+        notified_cs_name = cs.name if cs else None
+
     return ToolResult(
-        content_for_model=ticket_read.model_dump_json(),
+        content_for_model=(
+            f"{ticket_read.model_dump_json()} "
+            f"notified_kam_name={notified_kam_name} notified_cs_name={notified_cs_name}"
+        ),
         summary_for_trace=f"Created ticket #{ticket.id} for you",
         # show_feedback closes out this chat thread client-side (see
         # ChatPage.tsx) the same way mark_issue_resolved does — raising a

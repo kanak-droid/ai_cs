@@ -8,7 +8,7 @@ ticket's status (no DB trigger, no ORM event hook; see the build plan for why).
 
 from datetime import timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -87,6 +87,29 @@ _EVIDENCE_REQUIRED_CATEGORIES = {"technical", "other", "payout", "kyc", "profile
 
 def needs_evidence(category: str) -> bool:
     return category.strip().lower() in _EVIDENCE_REQUIRED_CATEGORIES
+
+
+_TERMINAL_STATUSES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
+
+
+def get_active_ticket_for_category(db: Session, astrologer_id: int, category: str) -> Ticket | None:
+    """Most recent still-open (not resolved/closed) ticket this astrologer
+    already has for this category, if any — used to stop a duplicate ticket
+    for the same problem while one is already in the queue (see
+    tool_registry._handle_create_support_ticket). A resolved-but-not-yet-
+    auto-closed ticket (§7a) doesn't count as active here — RESOLVED is
+    already excluded regardless of whether the 5-day auto-close has actually
+    run yet."""
+    stmt = (
+        select(Ticket)
+        .where(
+            Ticket.astrologer_id == astrologer_id,
+            func.lower(Ticket.category) == category.strip().lower(),
+            Ticket.status.not_in(_TERMINAL_STATUSES),
+        )
+        .order_by(Ticket.created_at.desc())
+    )
+    return db.scalars(stmt).first()
 
 
 def _record_status(
