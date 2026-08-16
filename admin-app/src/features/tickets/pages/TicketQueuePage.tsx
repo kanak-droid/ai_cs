@@ -28,6 +28,9 @@ export function TicketQueuePage() {
 
   const { data: tickets, status } = useTicketQueue(filters);
 
+  const activeTickets = tickets?.filter((t) => t.status !== "resolved" && t.status !== "closed") ?? [];
+  const closedTickets = tickets?.filter((t) => t.status === "resolved" || t.status === "closed") ?? [];
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -45,7 +48,26 @@ export function TicketQueuePage() {
       {status === "success" && tickets.length === 0 && (
         <EmptyState title="No tickets match these filters" />
       )}
-      {status === "success" && tickets.length > 0 && <TicketQueueTable tickets={tickets} />}
+      {status === "success" && tickets.length > 0 && (
+        <>
+          {activeTickets.length > 0 ? (
+            <TicketQueueTable tickets={activeTickets} />
+          ) : (
+            <p className="text-sm text-night/40">No active tickets — everything's resolved.</p>
+          )}
+
+          <div className="mt-2 flex flex-col gap-2">
+            <h2 className="text-sm font-medium uppercase tracking-wide text-night/40">
+              Resolved ({closedTickets.length})
+            </h2>
+            {closedTickets.length === 0 ? (
+              <p className="text-sm text-night/40">No resolved tickets yet.</p>
+            ) : (
+              <TicketQueueTable tickets={closedTickets} />
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
