@@ -1,9 +1,43 @@
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.models.astrologer import Astrologer
 from app.models.expert_priority import ExpertPriority
 from app.models.sheet_sync import SheetAstrologerRoster, SheetQueuePerformance
 from app.services import sheets_sync_service
+
+
+def test_upsert_many_updates_an_existing_row_in_place(db_session):
+    db_session.add(SheetAstrologerRoster(expert_id=601, name="Old Name", phone_number="+91-1"))
+    db_session.commit()
+
+    count = sheets_sync_service._upsert_many(
+        db_session, SheetAstrologerRoster, [(601, {"name": "New Name", "phone_number": "+91-2"})]
+    )
+
+    assert count == 1
+    row = db_session.query(SheetAstrologerRoster).filter_by(expert_id=601).one()
+    assert row.name == "New Name"
+    assert row.phone_number == "+91-2"
+
+
+def test_upsert_many_collapses_a_duplicate_expert_id_within_the_same_batch(db_session):
+    # The KYC tab has a few repeated expert_ids — the later row in the same
+    # batch must win, not create a second row with the same primary key.
+    count = sheets_sync_service._upsert_many(
+        db_session,
+        SheetAstrologerRoster,
+        [
+            (602, {"name": "First Pass", "phone_number": "+91-1"}),
+            (602, {"name": "Second Pass", "phone_number": "+91-2"}),
+        ],
+    )
+
+    assert count == 2
+    rows = db_session.scalars(select(SheetAstrologerRoster).where(SheetAstrologerRoster.expert_id == 602)).all()
+    assert len(rows) == 1
+    assert rows[0].name == "Second Pass"
+    assert rows[0].phone_number == "+91-2"
 
 
 def test_provisions_a_new_astrologer_for_an_unlinked_priority_row(db_session, seeded_admin):

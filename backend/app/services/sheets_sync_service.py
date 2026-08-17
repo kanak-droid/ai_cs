@@ -57,108 +57,113 @@ def _to_int(value: str | None) -> int | None:
         return None
 
 
-def _upsert(db: Session, model, expert_id: int, **fields) -> None:
-    obj = db.get(model, expert_id)
-    if obj is None:
-        obj = model(expert_id=expert_id)
-        db.add(obj)
-    for key, value in fields.items():
-        setattr(obj, key, value)
-    # A newly-added object only enters the identity map on flush — without
-    # this, a duplicate expert_id later in the same sheet (the KYC tab has a
-    # few) wouldn't be found by db.get() above and would insert a second row
-    # with the same primary key instead of overwriting this one.
+def _upsert_many(db: Session, model, entries: list[tuple[int, dict]]) -> int:
+    """Upserts every (expert_id, fields) entry against one preloaded snapshot
+    of the table instead of one db.get() + db.flush() round trip per row —
+    with a few thousand rows per sheet, that per-row pattern alone added up
+    to tens of thousands of sequential round trips across a single sync,
+    slow enough to blow past the ingress timeout (observed live 2026-08-18).
+
+    The local `existing` dict is kept up to date as rows are added, so a
+    duplicate expert_id later in the same sheet (the KYC tab has a few)
+    still overwrites the earlier one instead of inserting a second row with
+    the same primary key — the same guarantee the old per-row flush gave,
+    without needing a flush to get it.
+    """
+    existing = {obj.expert_id: obj for obj in db.scalars(select(model)).all()}
+    for expert_id, fields in entries:
+        obj = existing.get(expert_id)
+        if obj is None:
+            obj = model(expert_id=expert_id)
+            db.add(obj)
+            existing[expert_id] = obj
+        for key, value in fields.items():
+            setattr(obj, key, value)
     db.flush()
+    return len(entries)
 
 
 def _sync_roster(db: Session) -> int:
     header, rows = sheets_client.read_tab(settings.PAYOUT_SPREADSHEET_ID, "Expert ID", header_row=1)
-    count = 0
+    entries = []
     for row in rows:
         expert_id = _to_int(sheets_client.cell(row, 1))
         if expert_id is None:
             continue
-        _upsert(
-            db,
-            SheetAstrologerRoster,
+        entries.append((
             expert_id,
-            name=sheets_client.cell(row, 0),
-            phone_number=sheets_client.cell(row, 2),
-        )
-        count += 1
-    return count
+            {"name": sheets_client.cell(row, 0), "phone_number": sheets_client.cell(row, 2)},
+        ))
+    return _upsert_many(db, SheetAstrologerRoster, entries)
 
 
 def _sync_kyc(db: Session) -> int:
     header, rows = sheets_client.read_tab(settings.KYC_SPREADSHEET_ID, "KYC", header_row=1)
-    count = 0
+    entries = []
     for row in rows:
         expert_id = _to_int(sheets_client.cell(row, 22))
         if expert_id is None:
             continue
-        _upsert(
-            db,
-            SheetKycRecord,
+        entries.append((
             expert_id,
-            expert_name=sheets_client.cell(row, 23),
-            kyc_status=sheets_client.cell(row, 1),
-            verification_status=sheets_client.cell(row, 5),
-            entry_status=sheets_client.cell(row, 20),
-            message=sheets_client.cell(row, 21),
-        )
-        count += 1
-    return count
+            {
+                "expert_name": sheets_client.cell(row, 23),
+                "kyc_status": sheets_client.cell(row, 1),
+                "verification_status": sheets_client.cell(row, 5),
+                "entry_status": sheets_client.cell(row, 20),
+                "message": sheets_client.cell(row, 21),
+            },
+        ))
+    return _upsert_many(db, SheetKycRecord, entries)
 
 
 def _sync_expert_priority(db: Session) -> int:
     rows = analytics_client.fetch_csv(settings.PRIORITY_QUERY_CSV_URL)
-    count = 0
+    entries = []
     for row in rows:
         expert_id = _to_int(row.get("expert_id"))
         if expert_id is None:
             continue
         tier = (row.get("current_priority") or "").strip() or None
-        _upsert(
-            db,
-            ExpertPriority,
+        entries.append((
             expert_id,
-            user_id=_to_int(row.get("user_id")),
-            expert_name=row.get("expert_name"),
-            current_priority_tier=tier,
-            priority=_PRIORITY_TIER_TO_INT.get(tier) if tier else None,
-        )
-        count += 1
-    return count
+            {
+                "user_id": _to_int(row.get("user_id")),
+                "expert_name": row.get("expert_name"),
+                "current_priority_tier": tier,
+                "priority": _PRIORITY_TIER_TO_INT.get(tier) if tier else None,
+            },
+        ))
+    return _upsert_many(db, ExpertPriority, entries)
 
 
 def _sync_payout_status(db: Session) -> int:
     header, rows = sheets_client.read_tab(
         settings.PAYOUT_SPREADSHEET_ID, settings.PAYOUT_CYCLE_TAB, header_row=1
     )
-    count = 0
+    entries = []
     for row in rows:
         expert_id = _to_int(sheets_client.cell(row, 1))
         if expert_id is None:
             continue
-        _upsert(
-            db,
-            SheetPayoutStatus,
+        entries.append((
             expert_id,
-            name=sheets_client.cell(row, 2),
-            wallet_balance=_to_int(sheets_client.cell(row, 4)),
-            payout=_to_int(sheets_client.cell(row, 5)),
-            incentive=_to_int(sheets_client.cell(row, 6)),
-            penalty_amount=_to_int(sheets_client.cell(row, 8)),
-            kyc_status=sheets_client.cell(row, 12),
-            tds_deducted_percent=sheets_client.cell(row, 13),
-            tds_amount=_to_int(sheets_client.cell(row, 14)),
-            total_after_tax=_to_int(sheets_client.cell(row, 15)),
-            status=sheets_client.cell(row, 19),
-            processed_at=sheets_client.cell(row, 20),
-            cycle_tab=settings.PAYOUT_CYCLE_TAB,
-        )
-        count += 1
-    return count
+            {
+                "name": sheets_client.cell(row, 2),
+                "wallet_balance": _to_int(sheets_client.cell(row, 4)),
+                "payout": _to_int(sheets_client.cell(row, 5)),
+                "incentive": _to_int(sheets_client.cell(row, 6)),
+                "penalty_amount": _to_int(sheets_client.cell(row, 8)),
+                "kyc_status": sheets_client.cell(row, 12),
+                "tds_deducted_percent": sheets_client.cell(row, 13),
+                "tds_amount": _to_int(sheets_client.cell(row, 14)),
+                "total_after_tax": _to_int(sheets_client.cell(row, 15)),
+                "status": sheets_client.cell(row, 19),
+                "processed_at": sheets_client.cell(row, 20),
+                "cycle_tab": settings.PAYOUT_CYCLE_TAB,
+            },
+        ))
+    return _upsert_many(db, SheetPayoutStatus, entries)
 
 
 def _provision_new_astrologers(db: Session) -> int:
@@ -192,13 +197,16 @@ def _provision_new_astrologers(db: Session) -> int:
     one collision just skips that one expert (it's already provisioned by
     the other call) instead of aborting the whole batch.
 
-    KAMs are fetched once, up front, rather than via the usual
-    admin_mapping_client.get_assigned_admin() per row — that call re-queries
-    the full KAM table and re-fetches the astrologer that was just inserted,
-    on every single candidate. With a few thousand candidates on the first
-    real run, those two extra round trips each made this step slow enough to
+    KAMs, the roster, and queue-performance data are all preloaded once up
+    front rather than re-queried per candidate (via db.get() and the usual
+    admin_mapping_client.get_assigned_admin(), which does its own KAM table
+    scan plus an astrologer re-fetch). With a few thousand candidates on the
+    first real run, those per-row round trips made this step slow enough to
     blow past the ingress timeout (observed live 2026-08-18: the request
-    never came back, though the sync kept running server-side).
+    never came back, though the sync kept running server-side). Only the
+    insert itself still needs its own round trip per row — Postgres doesn't
+    hand out the new Astrologer.id needed for the KAM round-robin below
+    until the row is actually flushed.
     """
     already_linked = {
         expert_id
@@ -212,11 +220,13 @@ def _provision_new_astrologers(db: Session) -> int:
     if not candidates:
         return 0
     kams = admin_mapping_client.fetch_active_kams(db)
+    rosters = {obj.expert_id: obj for obj in db.scalars(select(SheetAstrologerRoster)).all()}
+    queue_performances = {obj.expert_id: obj for obj in db.scalars(select(SheetQueuePerformance)).all()}
 
     count = 0
     for priority_row in candidates:
-        roster = db.get(SheetAstrologerRoster, priority_row.expert_id)
-        queue_performance = db.get(SheetQueuePerformance, priority_row.expert_id)
+        roster = rosters.get(priority_row.expert_id)
+        queue_performance = queue_performances.get(priority_row.expert_id)
         name = (roster.name if roster else None) or priority_row.expert_name or f"Expert {priority_row.expert_id}"
         astrologer = Astrologer(
             name=name,
@@ -263,13 +273,20 @@ def _sync_astrologer_profiles(db: Session) -> int:
     Also backfills user_id from the priority sync (added to that query
     2026-08-14) — this is the real platform identity a real astrologer JWT
     is actually keyed by, distinct from expert_id.
+
+    Roster/queue-performance/priority are preloaded once rather than via
+    db.get() per linked astrologer — see _upsert_many's docstring for why
+    that per-row pattern doesn't scale past a few hundred rows.
     """
     linked = db.scalars(select(Astrologer).where(Astrologer.expert_id.is_not(None))).all()
+    rosters = {obj.expert_id: obj for obj in db.scalars(select(SheetAstrologerRoster)).all()}
+    queue_performances = {obj.expert_id: obj for obj in db.scalars(select(SheetQueuePerformance)).all()}
+    priority_rows = {obj.expert_id: obj for obj in db.scalars(select(ExpertPriority)).all()}
     count = 0
     for astrologer in linked:
-        roster = db.get(SheetAstrologerRoster, astrologer.expert_id)
-        queue_performance = db.get(SheetQueuePerformance, astrologer.expert_id)
-        priority_row = db.get(ExpertPriority, astrologer.expert_id)
+        roster = rosters.get(astrologer.expert_id)
+        queue_performance = queue_performances.get(astrologer.expert_id)
+        priority_row = priority_rows.get(astrologer.expert_id)
         changed = False
         if roster and roster.phone_number and astrologer.phone != roster.phone_number:
             astrologer.phone = roster.phone_number
