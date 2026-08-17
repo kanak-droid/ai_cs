@@ -17,12 +17,16 @@ function renderFormattedText(text: string) {
 
 export function MessageBubble({
   message,
+  showResolvePrompt,
   onFeedbackSubmit,
   onTicketSatisfaction,
+  onResolveConfirm,
 }: {
   message: DisplayMessage;
+  showResolvePrompt: boolean;
   onFeedbackSubmit: (rating: number, comment: string) => void;
   onTicketSatisfaction: (ticketId: number, satisfied: boolean) => void;
+  onResolveConfirm: () => void;
 }) {
   const isAstrologer = message.role === "astrologer";
 
@@ -61,6 +65,15 @@ export function MessageBubble({
       )}
       {message.feedbackSubmitted && (
         <p className="mt-1 text-xs text-night/40">Thanks for the feedback!</p>
+      )}
+      {showResolvePrompt && (
+        <button
+          type="button"
+          onClick={onResolveConfirm}
+          className="mt-2 rounded-full bg-moss px-3 py-1.5 text-xs font-medium text-white"
+        >
+          Yes, this solved it — close chat
+        </button>
       )}
       {message.ticketSatisfactionPrompt !== undefined && (
         <div className="mt-2 flex gap-2">

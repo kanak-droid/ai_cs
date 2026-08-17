@@ -15,6 +15,9 @@ class AstrologerRead(BaseModel):
     language: str
     photo_url: str | None = None
     assigned_admin_id: int | None = None
+    # Join key into the ops team's Google Sheets — None for astrologers ops
+    # hasn't linked to a real expert yet (mocked payout/KYC/priority data).
+    expert_id: int | None = None
     # Transient — set by ticket_service.attach_astrologer_priority, not a
     # real column (see that function's docstring). None only if the caller
     # forgot to attach it.

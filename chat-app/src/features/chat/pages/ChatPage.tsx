@@ -133,7 +133,11 @@ export function ChatPage() {
     );
   }
 
-  async function handleSend(text: string, attachment?: { file: File; previewUrl: string }) {
+  async function handleSend(
+    text: string,
+    attachment?: { file: File; previewUrl: string },
+    options?: { resolveMarker?: boolean },
+  ) {
     const history = toHistory(messages);
     const outgoingId = makeId();
     const displayText = text || (attachment ? "Here's my photo/video." : "");
@@ -161,6 +165,15 @@ export function ChatPage() {
         const { url } = await uploadAttachment(attachment.file);
         uploadedUrl = url;
         backendText = `${displayText}\n\n[Uploaded attachment URL: ${url}]`;
+      }
+      // A fixed, unambiguous marker (same convention as the attachment-URL
+      // one above) — the "did this fix it?" button's click sends this
+      // instead of asking the astrologer to type a confirmation themselves.
+      // See prompt.py: this exact marker always counts as a confirmed
+      // resolution, even after a simple factual lookup that wouldn't
+      // otherwise have prompted for one.
+      if (options?.resolveMarker) {
+        backendText = `${backendText}\n\n[Astrologer confirmed: Yes, this solved my issue. Please close this chat now.]`;
       }
 
       const response = await sendMessage.mutateAsync({ message: backendText, history, sessionId });
@@ -209,6 +222,10 @@ export function ChatPage() {
     });
   }
 
+  function handleResolveConfirm() {
+    handleSend("Yes, that solved it — please close this chat.", undefined, { resolveMarker: true });
+  }
+
   function handleUnsatisfied() {
     // Reopens a thread that may have already closed (e.g. from the earlier
     // ticket-raising message) — the astrologer needs to actually describe
@@ -238,8 +255,10 @@ export function ChatPage() {
         <MessageList
           messages={messages}
           isWaitingForReply={sendMessage.isPending}
+          chatClosed={chatClosed}
           onFeedbackSubmit={handleFeedbackSubmit}
           onTicketSatisfaction={handleTicketSatisfaction}
+          onResolveConfirm={handleResolveConfirm}
         />
       </div>
       <TicketStatusBanner />

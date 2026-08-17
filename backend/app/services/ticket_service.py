@@ -190,11 +190,17 @@ def create_ticket(
     ticket.kam_notified = kam_notified
     ticket.cs_notified = cs_notified
 
+    priority = queue_performance_client.get_queue_performance(db, astrologer_id).priority
+    priority_label = f"P{priority}" if priority is not None else "Unranked"
+    expert_id_label = astrologer.expert_id if astrologer and astrologer.expert_id else "not linked"
+    astrologer_name = astrologer.name if astrologer else "Unknown"
+
     header = f"{_TEAM_EMOJI.get(team, '🎫')} *New ticket #{ticket.id}*"
     body = (
         f"*Category:* {category} / {sub_category}\n"
         f"*Team:* {team} team\n"
-        f"*Astrologer:* #{astrologer_id}"
+        f"*Astrologer:* {astrologer_name} (#{astrologer_id}, expert_id: {expert_id_label}) — "
+        f"Priority: {priority_label}"
     )
     cs_line = (
         f"\n*CS:* @{cs_name} ({'/'.join(cs_admin.languages) or 'no language set'})"

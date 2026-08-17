@@ -34,6 +34,19 @@ def test_parses_base64_encoded_json_from_env_var(monkeypatch):
     assert sheets_client._credentials_info_from_env() == _SAMPLE_CREDS
 
 
+def test_parses_base64_with_stripped_trailing_padding(monkeypatch):
+    # Hit for real in production (2026-08-17) — trailing "=" padding got
+    # silently stripped when pasted through a Secret-editing UI, twice in a
+    # row. Base64 padding is always 0, 1, or 2 "=" chars — test stripping
+    # each amount that was actually present.
+    encoded = base64.b64encode(json.dumps(_SAMPLE_CREDS).encode()).decode()
+    padding = len(encoded) - len(encoded.rstrip("="))
+    for missing in range(1, padding + 1):
+        stripped = encoded[:-missing]
+        monkeypatch.setattr(settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", stripped)
+        assert sheets_client._credentials_info_from_env() == _SAMPLE_CREDS
+
+
 def test_garbage_env_var_raises_rather_than_silently_falling_back(monkeypatch):
     # Not valid JSON and not valid base64-of-JSON — should fail loudly, not
     # silently pretend the env var was never set and fall back to the file.

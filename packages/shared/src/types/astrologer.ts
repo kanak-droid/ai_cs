@@ -5,5 +5,6 @@ export interface Astrologer {
   language: string;
   photo_url: string | null;
   assigned_admin_id: number | null;
+  expert_id: number | null;
   priority: number | null;
 }

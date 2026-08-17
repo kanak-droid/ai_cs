@@ -39,13 +39,20 @@ def _credentials_info_from_env() -> dict | None:
     """GOOGLE_SHEETS_CREDENTIALS_JSON — the credential file's content, for
     deployments (e.g. a k8s Secret) that hand us env vars, not files. Raw
     JSON or base64-encoded JSON (`base64 -w0 credentials.json`), either
-    works — sniffed by whether it looks like JSON already."""
+    works — sniffed by whether it looks like JSON already.
+
+    Trailing "=" padding on the base64 form has been observed getting
+    silently stripped when pasted through some Secret-editing UIs (hit in
+    production 2026-08-17, twice) — re-added here rather than requiring a
+    byte-perfect paste every time, since a missing 1-2 characters at the
+    end is otherwise a very easy, very quiet way to break this."""
     raw = settings.GOOGLE_SHEETS_CREDENTIALS_JSON.strip()
     if not raw:
         return None
     if raw.startswith("{"):
         return json.loads(raw)
-    return json.loads(base64.b64decode(raw).decode("utf-8"))
+    padded = raw + "=" * (-len(raw) % 4)
+    return json.loads(base64.b64decode(padded).decode("utf-8"))
 
 
 def _get_service():

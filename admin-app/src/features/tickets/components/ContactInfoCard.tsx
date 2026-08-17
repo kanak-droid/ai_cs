@@ -13,7 +13,9 @@ export function ContactInfoCard({ astrologer }: { astrologer: Astrologer }) {
           {astrologer.priority <= 2 ? " (VIP)" : ""}
         </p>
       )}
-      <p className="mt-1 text-xs text-night/30">ID #{astrologer.id}</p>
+      <p className="mt-1 text-xs text-night/30">
+        ID #{astrologer.id} · Expert ID {astrologer.expert_id ?? "not linked"}
+      </p>
     </div>
   );
 }

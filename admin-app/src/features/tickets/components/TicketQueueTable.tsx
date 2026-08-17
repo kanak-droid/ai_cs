@@ -45,7 +45,9 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
             >
               <td className="px-4 py-3">
                 <p className="font-medium text-night">{ticket.astrologer.name}</p>
-                <p className="text-xs text-night/40">#{ticket.astrologer_id}</p>
+                <p className="text-xs text-night/40">
+                  #{ticket.astrologer_id} · Expert ID {ticket.astrologer.expert_id ?? "not linked"}
+                </p>
               </td>
               <td className="px-4 py-3">
                 <p className="capitalize text-night">{ticket.category.replace(/_/g, " ")}</p>
