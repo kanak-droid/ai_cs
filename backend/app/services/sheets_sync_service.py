@@ -26,6 +26,7 @@ stats remain unsynced until ops shares a source for those specifically.
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -179,6 +180,17 @@ def _provision_new_astrologers(db: Session) -> int:
     New astrologer's KAM is assigned through the same language-matched
     round-robin as everything else (admin_mapping_client), applied the
     first time they're seen here — not a separate/different assignment path.
+
+    Each row's insert is wrapped in its own SAVEPOINT: with up to a few
+    thousand candidates on the very first run, two overlapping sync calls
+    (a double-click of "Sync now", or a retry landing while an earlier one
+    was still mid-flight) can both decide the same expert_id is still
+    unlinked before either commits — the second one's insert then hits
+    ix_astrologers_expert_id's unique constraint. Observed live 2026-08-18:
+    that crashed this entire step, and every candidate after the collision
+    in the batch silently never got provisioned. A per-row savepoint means
+    one collision just skips that one expert (it's already provisioned by
+    the other call) instead of aborting the whole batch.
     """
     already_linked = {
         expert_id
@@ -207,7 +219,21 @@ def _provision_new_astrologers(db: Session) -> int:
             user_id=priority_row.user_id,
         )
         db.add(astrologer)
-        db.flush()  # assigns astrologer.id, needed for the KAM round-robin below
+        try:
+            with db.begin_nested():
+                db.flush()  # assigns astrologer.id, needed for the KAM round-robin below
+        except IntegrityError:
+            # The SAVEPOINT rollback undoes the failed INSERT but does not
+            # remove the object from the session's pending set — left alone,
+            # the very next autoflush (e.g. the db.get() calls below, for the
+            # *next* candidate) retries this same doomed insert and raises
+            # again, uncaught, outside this except. Must expunge explicitly.
+            db.expunge(astrologer)
+            logger.warning(
+                "Skipping expert_id=%s — provisioned concurrently by another sync call",
+                priority_row.expert_id,
+            )
+            continue
 
         assignment = admin_mapping_client.get_assigned_admin(db, astrologer.id)
         astrologer.assigned_admin_id = assignment.admin_id
