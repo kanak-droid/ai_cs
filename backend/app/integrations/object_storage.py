@@ -53,7 +53,7 @@ def _s3_client():
 
 
 def _upload_to_s3(filename: str, content: bytes, content_type: str) -> str:
-    key = f"uploads/{filename}"
+    key = f"{settings.S3_KEY_PREFIX}{filename}"
     try:
         _s3_client().put_object(
             Bucket=settings.S3_BUCKET_NAME,

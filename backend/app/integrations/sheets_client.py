@@ -45,10 +45,19 @@ def _credentials_info_from_env() -> dict | None:
     silently stripped when pasted through some Secret-editing UIs (hit in
     production 2026-08-17, twice) — re-added here rather than requiring a
     byte-perfect paste every time, since a missing 1-2 characters at the
-    end is otherwise a very easy, very quiet way to break this."""
+    end is otherwise a very easy, very quiet way to break this.
+
+    A YAML-backed Secret editor can also wrap a value starting with "{" in
+    quotes (unquoted "{" starts a YAML flow mapping) — if those literal
+    quote characters end up IN the env var itself rather than being
+    stripped before reaching the container, the value starts with a quote
+    character instead of "{", which would otherwise be silently (and
+    wrongly) treated as base64. Unwrapped here too."""
     raw = settings.GOOGLE_SHEETS_CREDENTIALS_JSON.strip()
     if not raw:
         return None
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
+        raw = raw[1:-1].strip()
     if raw.startswith("{"):
         return json.loads(raw)
     padded = raw + "=" * (-len(raw) % 4)

@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     S3_REGION: str = ""
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
+    # Key prefix within the bucket (e.g. "supply-issues/") — whoever
+    # provisions the bucket may scope IAM/lifecycle policy to a specific
+    # prefix rather than the bucket root. Include the trailing slash.
+    S3_KEY_PREFIX: str = "uploads/"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
 
     # Email has its own mock switch, same reasoning as SLACK_MOCK_MODE — no

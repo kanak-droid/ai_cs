@@ -57,6 +57,21 @@ def test_s3_upload_never_touches_the_real_network(monkeypatch):
     assert "ACL" not in call
 
 
+def test_s3_upload_uses_the_configured_key_prefix(monkeypatch):
+    monkeypatch.setattr(settings, "UPLOADS_BACKEND", "s3")
+    monkeypatch.setattr(settings, "S3_BUCKET_NAME", "astrohelp-test-bucket")
+    monkeypatch.setattr(settings, "S3_REGION", "ap-south-1")
+    monkeypatch.setattr(settings, "S3_KEY_PREFIX", "supply-issues/")
+
+    fake_client = _FakeS3Client()
+    monkeypatch.setattr(object_storage, "_s3_client", lambda: fake_client)
+
+    url = object_storage.upload_file("photo.jpg", b"bytes", "image/jpeg")
+
+    assert url == "https://astrohelp-test-bucket.s3.ap-south-1.amazonaws.com/supply-issues/photo.jpg"
+    assert fake_client.calls[0]["Key"] == "supply-issues/photo.jpg"
+
+
 def test_s3_upload_failure_raises_rather_than_silently_continuing(monkeypatch):
     # Unlike the Slack photo push (best-effort), a failed upload here means
     # the astrologer has no attachment at all — the caller must see a real

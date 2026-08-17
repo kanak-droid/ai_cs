@@ -27,6 +27,17 @@ def test_parses_raw_json_from_env_var(monkeypatch):
     assert sheets_client._credentials_info_from_env() == _SAMPLE_CREDS
 
 
+def test_parses_raw_json_wrapped_in_quotes_by_a_yaml_editor(monkeypatch):
+    # Hit for real in production (2026-08-17) — a YAML-backed Secret editor
+    # wraps a value starting with "{" in quotes (unquoted "{" starts a YAML
+    # flow mapping); if those literal quotes end up in the env var itself,
+    # the value no longer starts with "{" and was wrongly treated as base64.
+    for quote in ("'", '"'):
+        wrapped = f"{quote}{json.dumps(_SAMPLE_CREDS)}{quote}"
+        monkeypatch.setattr(settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", wrapped)
+        assert sheets_client._credentials_info_from_env() == _SAMPLE_CREDS
+
+
 def test_parses_base64_encoded_json_from_env_var(monkeypatch):
     encoded = base64.b64encode(json.dumps(_SAMPLE_CREDS).encode()).decode()
     monkeypatch.setattr(settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", encoded)
