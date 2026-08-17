@@ -1,7 +1,17 @@
 import { authStorage } from "../auth/authStorage";
 import { ApiError } from "./http-error";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+declare global {
+  interface Window {
+    __RUNTIME_CONFIG__?: { API_BASE_URL?: string };
+  }
+}
+
+// Prefer the runtime config written by docker-entrypoint.d at container
+// startup (see admin-app/Dockerfile) — the build-time VITE_API_BASE_URL is
+// frozen into the bundle forever and can't vary per environment. Falls back
+// to it anyway for local `npm run dev`, where no config.js is served.
+const BASE_URL = window.__RUNTIME_CONFIG__?.API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
 
 type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
 

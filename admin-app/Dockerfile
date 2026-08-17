@@ -3,16 +3,21 @@
 # to install correctly. e.g.:
 #   docker build -f admin-app/Dockerfile -t admin-app .
 #
-# VITE_API_BASE_URL is baked into the static bundle at build time (Vite
-# inlines import.meta.env.* during `npm run build`) — pass it as a build
-# arg per environment, it can't be changed at container runtime after.
+# VITE_API_BASE_URL used to be the only way to point this app at a backend,
+# but Vite bakes import.meta.env.* into the static bundle at build time — it
+# can never change at container runtime after, so the same built image
+# couldn't be deployed to more than one environment (dev vs. production)
+# without a full rebuild each time. Confirmed live 2026-08-18: production's
+# admin dashboard was silently calling the dev backend because this ARG's
+# default was never overridden for the production build, and this Devtron
+# instance's Build Configuration UI has no exposed field for passing
+# --build-arg through to the CI pipeline anyway.
 #
-# Defaulted here (rather than left empty) because this Devtron instance's
-# Build Configuration UI has no exposed field for passing --build-arg
-# through to the CI pipeline — if that turns out to exist elsewhere (e.g.
-# the Workflow Editor's pipeline config), an explicit --build-arg still
-# overrides this default as normal. Update this default if the real
-# backend/chat app's URL ends up different from what C2S actually creates.
+# The real, per-environment URL now comes from docker-entrypoint.d's
+# generate-runtime-config script, sourced from a normal container env var
+# (API_BASE_URL) at container *startup*, not build time — see
+# admin-app/src/lib/apiClient.ts for how it's consumed. This ARG only
+# remains as the fallback `npm run dev` / non-Docker build value.
 FROM node:20-alpine AS build
 WORKDIR /repo
 
@@ -28,5 +33,7 @@ RUN npm run build --workspace admin-app
 
 FROM nginx:1.27-alpine
 COPY admin-app/nginx.conf /etc/nginx/conf.d/default.conf
+COPY admin-app/docker-entrypoint.d/40-generate-runtime-config.sh /docker-entrypoint.d/40-generate-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-generate-runtime-config.sh
 COPY --from=build /repo/admin-app/dist /usr/share/nginx/html
 EXPOSE 80

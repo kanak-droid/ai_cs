@@ -8,6 +8,14 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Written at container startup by docker-entrypoint.d's runtime-config
+      script — absent in local `npm run dev` (no such file exists), which is
+      fine since apiClient.ts falls back to the build-time env var then.
+      Must be a plain (non-module) script so it runs before the deferred
+      module bundle below.
+    -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
