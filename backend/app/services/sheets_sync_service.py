@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.integrations import analytics_client, sheets_client
+from app.integrations import admin_mapping_client, analytics_client, sheets_client
 from app.models.astrologer import Astrologer
 from app.models.expert_priority import ExpertPriority
 from app.models.sheet_sync import (
@@ -160,6 +160,61 @@ def _sync_payout_status(db: Session) -> int:
     return count
 
 
+def _provision_new_astrologers(db: Session) -> int:
+    """Creates a real Astrologer row for any expert who shows up in the
+    priority-ranking query (i.e. has real call/booking activity) but has no
+    Astrologer row linked to their expert_id yet.
+
+    Without this, a brand-new database never has anyone a real astrologer's
+    JWT (keyed by plain user_id — see auth_service.resolve_astrologer_by_user_id)
+    can actually resolve to, even though the source data already has the
+    link — confirmed live 2026-08-18: every real user_id got "session
+    expired" against a fresh production database with zero linked rows,
+    despite the priority query itself having real expert_id/user_id pairs.
+
+    Deliberately scoped to the priority query, not the full roster sheet —
+    an expert with no call/booking activity yet isn't a real user of this
+    product regardless of whether ops has them in the roster.
+
+    New astrologer's KAM is assigned through the same language-matched
+    round-robin as everything else (admin_mapping_client), applied the
+    first time they're seen here — not a separate/different assignment path.
+    """
+    already_linked = {
+        expert_id
+        for (expert_id,) in db.execute(
+            select(Astrologer.expert_id).where(Astrologer.expert_id.is_not(None))
+        )
+    }
+    candidates = [
+        row for row in db.scalars(select(ExpertPriority)).all() if row.expert_id not in already_linked
+    ]
+
+    count = 0
+    for priority_row in candidates:
+        roster = db.get(SheetAstrologerRoster, priority_row.expert_id)
+        queue_performance = db.get(SheetQueuePerformance, priority_row.expert_id)
+        name = (roster.name if roster else None) or priority_row.expert_name or f"Expert {priority_row.expert_id}"
+        astrologer = Astrologer(
+            name=name,
+            phone=(roster.phone_number if roster else None) or "",
+            language=(
+                queue_performance.languages
+                if queue_performance and queue_performance.languages
+                else "English"
+            ),
+            expert_id=priority_row.expert_id,
+            user_id=priority_row.user_id,
+        )
+        db.add(astrologer)
+        db.flush()  # assigns astrologer.id, needed for the KAM round-robin below
+
+        assignment = admin_mapping_client.get_assigned_admin(db, astrologer.id)
+        astrologer.assigned_admin_id = assignment.admin_id
+        count += 1
+    return count
+
+
 def _sync_astrologer_profiles(db: Session) -> int:
     """Linking an Astrologer to a real expert_id (§8a) only wired up identity
     (name, id) — their phone/language kept whatever scripts/seed.py originally
@@ -206,6 +261,7 @@ _SYNC_STEPS = [
     ("kyc", _sync_kyc),
     ("payout_status", _sync_payout_status),
     ("expert_priority", _sync_expert_priority),
+    ("provisioned_astrologers", _provision_new_astrologers),
     ("astrologer_profiles", _sync_astrologer_profiles),
 ]
 

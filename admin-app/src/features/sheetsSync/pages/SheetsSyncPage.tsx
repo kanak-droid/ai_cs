@@ -6,6 +6,7 @@ const TABLE_LABELS: Record<string, string> = {
   kyc: "KYC records",
   payout_status: "Payout status (current cycle, incl. KYC/TDS)",
   expert_priority: "Priority ranking",
+  provisioned_astrologers: "Newly provisioned astrologers",
   astrologer_profiles: "Linked astrologer phone",
 };
 
