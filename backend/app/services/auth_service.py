@@ -51,11 +51,31 @@ def authenticate_admin(db: Session, email: str, password: str) -> Admin | None:
     return admin
 
 
+def _maybe_bootstrap_owner(db: Session, email: str, password: str) -> Admin | None:
+    """Falls back to this only when normal authentication above already
+    failed. The designated OWNER_EMAIL, with the admin-tier password,
+    always gets in — creating or reactivating a real Admin row on the spot
+    if one doesn't already (correctly) exist. See config.py's OWNER_EMAIL
+    comment for why this exists instead of requiring DB/pod access to
+    bootstrap the very first admin on a fresh database."""
+    if email.strip().lower() != settings.OWNER_EMAIL.strip().lower():
+        return None
+    if password != settings.ADMIN_ACCESS_PASSWORD:
+        return None
+    return grant_access(
+        db,
+        email=settings.OWNER_EMAIL,
+        name="Parth",
+        role=AdminRole.OTHERS,
+        access_level=AdminAccessLevel.ADMIN,
+    )
+
+
 def login_admin(db: Session, email: str, password: str) -> tuple[Admin, str] | None:
     # No domain restriction — any email can log in, as long as an existing
     # admin granted it access (see grant_access). That row's existence IS
-    # the access control.
-    admin = authenticate_admin(db, email, password)
+    # the access control — except for the one designated owner email below.
+    admin = authenticate_admin(db, email, password) or _maybe_bootstrap_owner(db, email, password)
     if admin is None:
         return None
     token = issue_admin_token(admin.id, admin.email, admin.access_level.value)

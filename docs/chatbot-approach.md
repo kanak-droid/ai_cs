@@ -981,31 +981,46 @@ break the actual chat/ticket flow it's just observing. The admin-app page
 (`AnalyticsPage.tsx`) polls every 30s — visible to any authenticated admin,
 no separate role.
 
-## 11. Domain-restricted admin signup
+## 11. Admin access: invite-only, no domain restriction, plus one bootstrap owner
 
-Admin dashboard access requires a `getlokalapp.com` or `astrolokal.com`
-email — `app/core/admin_access.py`'s `is_allowed_admin_domain()`, checked in
-two places: `POST /api/admin/signup` (rejects the request outright) and
-`auth_service.login_admin` (defense in depth — an account created before
-this policy existed, or by any future tooling that skips signup, still can't
-log in even with a correct password).
+Supersedes an earlier version of this section describing self-service
+signup with a `getlokalapp.com`/`astrolokal.com` domain check
+(`is_allowed_admin_domain`, `POST /api/admin/signup`,
+`issue_password_set_token`) — all fully removed same-day per an explicit
+call to drop both self-service signup and the domain restriction (any email
+can get access, but only if an existing admin grants it).
 
-Self-service, not invite-based — the domain check IS the access control:
+Current model: `auth_service.grant_access()` is the only way an email ever
+gets a working login — no signup route, no domain check. An existing
+ADMIN-access admin creates/updates the row from the dashboard's Admins page
+(or `scripts/create_admin.py`); the fixed, shared password for the granted
+access_level (`password_for_access_level`) is set immediately, so "granted
+access" and "has a working password" are the same moment, not a separate
+signup+set-password flow.
 
-1. `POST /api/admin/signup {email, name}` creates a passwordless `Admin` row
-   (`password_hash` is nullable specifically for this) and emails
-   (mocked, §8) a link containing a short-lived, single-purpose JWT
-   (`issue_password_set_token` — distinct `purpose` claim, so it can never be
-   presented anywhere a real admin session token is expected, despite
-   sharing `JWT_SECRET`).
-2. `POST /api/admin/set-password {token, password}` verifies the token and
-   sets the password — the admin-app's `/set-password` page is where the
-   emailed link lands.
-3. Normal `POST /api/admin/login` from there on.
+**Bootstrapping the very first admin on a brand-new database** (2026-08-16):
+hit for real deploying to a fresh production database — nobody can grant
+access via the dashboard until someone can already log in, and running
+`create_admin.py` requires reaching that exact database directly (shell
+access to a pod, or a reachable connection string), which isn't always
+convenient mid-deploy. Rather than requiring that every time, one
+designated `settings.OWNER_EMAIL` (default `parth.a@getlokalapp.com`)
+always gets in with `ADMIN_ACCESS_PASSWORD`, via
+`auth_service._maybe_bootstrap_owner` — checked only as a fallback after
+normal `authenticate_admin` already failed, so it never overrides a real,
+correctly-configured row.
 
-`authenticate_admin` treats a `None` `password_hash` as "can't log in yet"
-rather than erroring, so a signed-up-but-not-yet-set-password account fails
-login cleanly instead of crashing on `verify_password(password, None)`.
+This is deliberately NOT a separate always-on backdoor code path: it calls
+the same `grant_access()` everyone else goes through, creating or
+reactivating a genuine `Admin` row. Practically: it self-heals on a fresh
+database (nothing to bootstrap manually), and it also means this specific
+account can't actually be locked out by deactivating it on the dashboard —
+the next login attempt just reactivates it. That trade-off is intentional
+and scoped to exactly one hardcoded email, verified live both ways: a
+different email with the correct admin password is still rejected (401,
+no row created), and the owner email with the wrong password is also
+rejected (401) — it's not "the admin password works for anyone," only for
+that one address.
 
 ## 12. Testing strategy for the agent
 

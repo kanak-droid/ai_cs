@@ -1,6 +1,56 @@
+from app.core.config import settings
 from app.models.admin import Admin
 from app.models.enums import AdminAccessLevel, AdminRole
 from app.services import auth_service
+
+
+def test_owner_email_bootstraps_on_a_fresh_database_with_no_admin_rows(db_session):
+    assert db_session.query(Admin).count() == 0
+
+    result = auth_service.login_admin(db_session, settings.OWNER_EMAIL, settings.ADMIN_ACCESS_PASSWORD)
+
+    assert result is not None
+    admin, _token = result
+    assert admin.email == settings.OWNER_EMAIL
+    assert admin.access_level == AdminAccessLevel.ADMIN
+    assert admin.is_active is True
+
+
+def test_owner_email_bootstrap_reactivates_a_deactivated_row(db_session):
+    auth_service.grant_access(
+        db_session,
+        email=settings.OWNER_EMAIL,
+        name="Parth",
+        role=AdminRole.OTHERS,
+        access_level=AdminAccessLevel.ADMIN,
+    )
+    admin = db_session.query(Admin).filter_by(email=settings.OWNER_EMAIL).one()
+    admin.is_active = False
+    db_session.commit()
+
+    result = auth_service.login_admin(db_session, settings.OWNER_EMAIL, settings.ADMIN_ACCESS_PASSWORD)
+
+    assert result is not None
+    assert result[0].is_active is True
+
+
+def test_owner_email_bootstrap_rejects_the_wrong_password(db_session):
+    result = auth_service.login_admin(db_session, settings.OWNER_EMAIL, "wrong-password")
+
+    assert result is None
+    assert db_session.query(Admin).filter_by(email=settings.OWNER_EMAIL).count() == 0
+
+
+def test_a_different_email_never_bootstraps_even_with_the_admin_password(db_session):
+    # The critical negative case — this must stay scoped to exactly one
+    # designated email, never become a general "admin password lets anyone
+    # in" bypass.
+    result = auth_service.login_admin(
+        db_session, "someone.else@getlokalapp.com", settings.ADMIN_ACCESS_PASSWORD
+    )
+
+    assert result is None
+    assert db_session.query(Admin).filter_by(email="someone.else@getlokalapp.com").count() == 0
 
 
 def test_grant_access_has_no_domain_restriction(db_session):

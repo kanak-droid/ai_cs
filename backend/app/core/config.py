@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     NORMAL_ACCESS_PASSWORD: str = "astroHelp@123"
     ADMIN_ACCESS_PASSWORD: str = "astroHelpAdmin@123"
 
+    # This one email always gets ADMIN-access in with ADMIN_ACCESS_PASSWORD,
+    # even if no Admin row exists yet (or it was deactivated) — solves the
+    # bootstrap chicken-and-egg problem on a brand-new database (can't grant
+    # yourself dashboard access without already being logged in to grant it)
+    # without a permanent, un-auditable backdoor: see
+    # auth_service._maybe_bootstrap_owner, which creates/reactivates a REAL
+    # Admin row rather than a separate code path — deactivating it via the
+    # dashboard later works normally from then on, same as any other admin.
+    OWNER_EMAIL: str = "parth.a@getlokalapp.com"
+
     # Gemini
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-flash-latest"
