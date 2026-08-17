@@ -21,6 +21,7 @@ export function useCreateAdmin() {
       role: AdminRole;
       access_level: AdminAccessLevel;
       languages: string[];
+      slack_user_id?: string;
     }) => api.post<Admin>("/api/admin/admins", body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: adminsKey }),
   });
@@ -38,6 +39,7 @@ export function useUpdateAdmin() {
       access_level?: AdminAccessLevel;
       languages?: string[];
       is_active?: boolean;
+      slack_user_id?: string;
     }) => api.patch<Admin>(`/api/admin/admins/${id}`, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: adminsKey }),
   });

@@ -96,6 +96,31 @@ def test_vip_priority_ticket_tags_kam(db_session, seeded_astrologer, seeded_admi
     assert f"@{seeded_admin.name}" in entry.message
 
 
+def test_vip_priority_ticket_uses_a_real_slack_mention_when_the_kam_has_one_on_file(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch
+):
+    # Plain "@name" text in an incoming webhook message is never rendered as
+    # a real, notifying Slack mention — only <@SLACK_USER_ID> is. Confirmed
+    # this was silently never paging anyone (2026-08-18).
+    seeded_admin.slack_user_id = "U0123ABC456"
+    db_session.commit()
+    _force_priority(monkeypatch, priority=1)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="technical",
+        sub_category="app_crash",
+        description="App crashes on login",
+        description_en="App crashes on login",
+        preferred_language="English",
+    )
+
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert "<@U0123ABC456>" in entry.message
+    assert f"@{seeded_admin.name}" not in entry.message
+
+
 def test_non_vip_priority_ticket_does_not_tag_kam(db_session, seeded_astrologer, monkeypatch):
     # P3+ tickets still go to the shared CS channel and are still assigned
     # to a KAM internally, but the KAM isn't specially paged for them.

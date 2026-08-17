@@ -24,6 +24,14 @@ class Admin(Base):
     # immediately (the shared password for its access_level).
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     slack_channel: Mapped[str] = mapped_column(String(80), default="#support")
+    # Slack's own member id (e.g. "U0123ABC456", from "Copy member ID" on
+    # their Slack profile) — not their name or @handle. Needed to build a
+    # real `<@U0123ABC456>` mention, which is the only syntax Slack actually
+    # renders as a highlighted, notifying mention; plain "@name" text in an
+    # incoming webhook message is never converted into one. Nullable because
+    # not every admin has this on file yet — ticket_service falls back to
+    # plain "@name" text (visible, but silent) when it's unset.
+    slack_user_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     role: Mapped[AdminRole] = mapped_column(
         Enum(AdminRole, name="admin_role", native_enum=False), default=AdminRole.KAM
     )

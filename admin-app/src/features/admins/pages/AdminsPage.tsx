@@ -20,6 +20,7 @@ function AddAccessForm() {
   const [role, setRole] = useState<AdminRole>("kam");
   const [accessLevel, setAccessLevel] = useState<AdminAccessLevel>("normal");
   const [languages, setLanguages] = useState("");
+  const [slackUserId, setSlackUserId] = useState("");
   const createAdmin = useCreateAdmin();
 
   async function handleSubmit(event: React.FormEvent) {
@@ -30,12 +31,14 @@ function AddAccessForm() {
       role,
       access_level: accessLevel,
       languages: parseLanguages(languages),
+      slack_user_id: slackUserId.trim() || undefined,
     });
     setName("");
     setEmail("");
     setRole("kam");
     setAccessLevel("normal");
     setLanguages("");
+    setSlackUserId("");
   }
 
   return (
@@ -94,6 +97,15 @@ function AddAccessForm() {
           className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
         />
       </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-night/60">Slack user ID</span>
+        <input
+          placeholder="U0123ABC456"
+          value={slackUserId}
+          onChange={(e) => setSlackUserId(e.target.value)}
+          className="w-32 rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
+        />
+      </label>
       <button
         type="submit"
         disabled={createAdmin.isPending}
@@ -127,6 +139,7 @@ function AdminsTable({
             <th className="px-4 py-3">Role</th>
             <th className="px-4 py-3">Access</th>
             <th className="px-4 py-3">Languages</th>
+            <th className="px-4 py-3">Slack user ID</th>
             <th className="px-4 py-3">Status</th>
             <th className="px-4 py-3" />
           </tr>
@@ -174,6 +187,19 @@ function AdminsTable({
                     updateAdmin.mutate({ id: admin.id, languages: parseLanguages(e.target.value) })
                   }
                   className="w-36 rounded-lg border border-night/15 px-2 py-1 text-sm text-ink"
+                />
+              </td>
+              <td className="px-4 py-3">
+                <input
+                  key={admin.slack_user_id ?? ""}
+                  defaultValue={admin.slack_user_id ?? ""}
+                  placeholder="U0123ABC456"
+                  disabled={updateAdmin.isPending}
+                  onBlur={(e) => {
+                    const value = e.target.value.trim();
+                    if (value) updateAdmin.mutate({ id: admin.id, slack_user_id: value });
+                  }}
+                  className="w-32 rounded-lg border border-night/15 px-2 py-1 text-sm text-ink"
                 />
               </td>
               <td className="px-4 py-3">
@@ -234,7 +260,10 @@ export function AdminsPage() {
           page — Normal-access accounts log in with{" "}
           <span className="font-medium text-night/70">astroHelp@123</span>, admin-access accounts with{" "}
           <span className="font-medium text-night/70">astroHelpAdmin@123</span>. Deactivate a profile
-          here instead of deleting it to keep its ticket history intact.
+          here instead of deleting it to keep its ticket history intact. Set a Slack user ID (from
+          that person's Slack profile → "..." → Copy member ID) to have ticket notifications actually
+          @mention and notify them — without it, their name still shows in the message, but Slack
+          never pings them.
         </p>
       </div>
 

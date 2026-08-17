@@ -48,6 +48,7 @@ def create_admin(
         role=body.role,
         access_level=body.access_level,
         languages=body.languages,
+        slack_user_id=body.slack_user_id,
     )
     return AdminRead.model_validate(granted)
 
@@ -78,6 +79,8 @@ def update_admin(
         target.languages = body.languages
     if body.is_active is not None:
         target.is_active = body.is_active
+    if body.slack_user_id is not None:
+        target.slack_user_id = body.slack_user_id
 
     db.commit()
     db.refresh(target)

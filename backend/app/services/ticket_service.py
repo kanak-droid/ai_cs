@@ -112,6 +112,18 @@ def get_active_ticket_for_category(db: Session, astrologer_id: int, category: st
     return db.scalars(stmt).first()
 
 
+def _slack_mention(admin: Admin | None, fallback_name: str) -> str:
+    """`<@SLACK_USER_ID>` is the only syntax Slack actually renders as a
+    highlighted, notifying mention — plain "@name" text in an incoming
+    webhook message is never converted into one, so it silently never
+    pinged anyone. Falls back to plain text (still readable, just not a
+    real mention) for admins with no slack_user_id on file yet.
+    """
+    if admin and admin.slack_user_id:
+        return f"<@{admin.slack_user_id}>"
+    return f"@{fallback_name}"
+
+
 def _record_status(
     db: Session, ticket: Ticket, status: TicketStatus, *, changed_by: str, note: str | None = None
 ) -> None:
@@ -203,7 +215,7 @@ def create_ticket(
         f"Priority: {priority_label}"
     )
     cs_line = (
-        f"\n*CS:* @{cs_name} ({'/'.join(cs_admin.languages) or 'no language set'})"
+        f"\n*CS:* {_slack_mention(cs_admin, cs_name)} ({'/'.join(cs_admin.languages) or 'no language set'})"
         if cs_name and ticket.cs_notified
         else ""
     )
@@ -217,7 +229,10 @@ def create_ticket(
     elif is_vip:
         # VIP on any other category: shared channel, but KAM explicitly cc'd.
         channel = settings.SLACK_SUPPORT_CHANNEL
-        text = f"{header}\n{body}\n*KAM:* @{kam_name} (priority astrologer — please loop in){cs_line}"
+        text = (
+            f"{header}\n{body}\n*KAM:* {_slack_mention(admin, kam_name)} "
+            f"(priority astrologer — please loop in){cs_line}"
+        )
     else:
         # Standard CS routing — KAM stays the internal assignee but isn't
         # specially paged for a non-priority astrologer's ticket.

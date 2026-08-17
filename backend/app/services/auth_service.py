@@ -98,6 +98,7 @@ def grant_access(
     role: AdminRole,
     access_level: AdminAccessLevel,
     languages: list[str] | None = None,
+    slack_user_id: str | None = None,
 ) -> Admin:
     """Create or update an admin's dashboard access — the only way an email
     ever gets a working login; there is no self-service signup and no
@@ -122,6 +123,8 @@ def grant_access(
         admin.access_level = access_level
     if languages is not None:
         admin.languages = languages
+    if slack_user_id is not None:
+        admin.slack_user_id = slack_user_id
     admin.password_hash = hash_password(password_for_access_level(access_level))
     admin.is_active = True
     db.commit()

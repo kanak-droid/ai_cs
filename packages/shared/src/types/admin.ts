@@ -9,6 +9,10 @@ export interface Admin {
   name: string;
   email: string;
   slack_channel: string;
+  // Slack's own member id (e.g. "U0123ABC456") — needed to build a real
+  // <@U0123ABC456> mention, the only syntax Slack renders as a highlighted,
+  // notifying mention. Null until someone fills it in on the Admins page.
+  slack_user_id: string | null;
   role: AdminRole;
   access_level: AdminAccessLevel;
   languages: string[];

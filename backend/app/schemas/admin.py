@@ -31,6 +31,7 @@ class AdminRead(BaseModel):
     name: str
     email: str
     slack_channel: str
+    slack_user_id: str | None = None
     role: AdminRole
     access_level: AdminAccessLevel
     languages: list[str]
@@ -43,6 +44,7 @@ class AdminCreateRequest(BaseModel):
     role: AdminRole
     access_level: AdminAccessLevel = AdminAccessLevel.NORMAL
     languages: list[str] = []
+    slack_user_id: str | None = None
 
 
 class AdminUpdateRequest(BaseModel):
@@ -50,6 +52,7 @@ class AdminUpdateRequest(BaseModel):
     access_level: AdminAccessLevel | None = None
     languages: list[str] | None = None
     is_active: bool | None = None
+    slack_user_id: str | None = None
 
 
 class AdminTicketRead(TicketRead):
