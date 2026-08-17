@@ -19,6 +19,30 @@ def test_returns_none_when_env_var_unset(monkeypatch):
     assert sheets_client._credentials_info_from_env() is None
 
 
+def test_parses_devtrons_yaml_rewrite_of_a_pasted_json_value(monkeypatch):
+    # Hit for real in production (2026-08-18) — Devtron's Secret editor
+    # silently rewrote a pasted JSON credentials value into native YAML
+    # mapping syntax on save, including a literal block scalar ("private_key: |")
+    # for the multi-line PEM key. Not valid JSON, not valid base64 — only a
+    # YAML parser (which JSON is a subset of) handles both forms at once.
+    yaml_form = (
+        "type: service_account\n"
+        "project_id: x\n"
+        "private_key: |\n"
+        "  -----BEGIN PRIVATE KEY-----\n"
+        "  abc123\n"
+        "  -----END PRIVATE KEY-----\n"
+        "client_email: x@x.iam.gserviceaccount.com\n"
+    )
+    monkeypatch.setattr(settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", yaml_form)
+
+    info = sheets_client._credentials_info_from_env()
+
+    assert info["type"] == "service_account"
+    assert info["client_email"] == "x@x.iam.gserviceaccount.com"
+    assert info["private_key"] == "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----\n"
+
+
 def test_parses_raw_json_from_env_var(monkeypatch):
     monkeypatch.setattr(
         settings, "GOOGLE_SHEETS_CREDENTIALS_JSON", json.dumps(_SAMPLE_CREDS)

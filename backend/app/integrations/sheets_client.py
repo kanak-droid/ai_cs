@@ -18,6 +18,8 @@ import time
 from http.client import IncompleteRead
 from pathlib import Path
 
+import yaml
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -37,9 +39,17 @@ def _credentials_path() -> Path:
 
 def _credentials_info_from_env() -> dict | None:
     """GOOGLE_SHEETS_CREDENTIALS_JSON — the credential file's content, for
-    deployments (e.g. a k8s Secret) that hand us env vars, not files. Raw
-    JSON or base64-encoded JSON (`base64 -w0 credentials.json`), either
-    works — sniffed by whether it looks like JSON already.
+    deployments (e.g. a k8s Secret) that hand us env vars, not files.
+
+    Parsed as YAML rather than strict JSON — JSON is valid YAML, so a raw
+    JSON paste still works, but Devtron's Secret editor has been observed
+    silently rewriting a pasted JSON value into native YAML mapping syntax
+    on save (`type: service_account`, `private_key: |` with an indented
+    block, etc. — hit in production 2026-08-18), which is not valid JSON at
+    all. yaml.safe_load handles both forms transparently. Falls back to
+    base64-encoded JSON (`base64 -w0 credentials.json`) only if the value
+    doesn't parse into a mapping at all — i.e. it wasn't JSON or YAML to
+    begin with.
 
     Trailing "=" padding on the base64 form has been observed getting
     silently stripped when pasted through some Secret-editing UIs (hit in
@@ -50,16 +60,16 @@ def _credentials_info_from_env() -> dict | None:
     A YAML-backed Secret editor can also wrap a value starting with "{" in
     quotes (unquoted "{" starts a YAML flow mapping) — if those literal
     quote characters end up IN the env var itself rather than being
-    stripped before reaching the container, the value starts with a quote
-    character instead of "{", which would otherwise be silently (and
-    wrongly) treated as base64. Unwrapped here too."""
+    stripped before reaching the container, YAML would parse the whole
+    thing as one quoted string rather than a mapping. Unwrapped here too."""
     raw = settings.GOOGLE_SHEETS_CREDENTIALS_JSON.strip()
     if not raw:
         return None
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
         raw = raw[1:-1].strip()
-    if raw.startswith("{"):
-        return json.loads(raw)
+    parsed = yaml.safe_load(raw)
+    if isinstance(parsed, dict):
+        return parsed
     padded = raw + "=" * (-len(raw) % 4)
     return json.loads(base64.b64decode(padded).decode("utf-8"))
 
