@@ -191,6 +191,14 @@ def _provision_new_astrologers(db: Session) -> int:
     in the batch silently never got provisioned. A per-row savepoint means
     one collision just skips that one expert (it's already provisioned by
     the other call) instead of aborting the whole batch.
+
+    KAMs are fetched once, up front, rather than via the usual
+    admin_mapping_client.get_assigned_admin() per row — that call re-queries
+    the full KAM table and re-fetches the astrologer that was just inserted,
+    on every single candidate. With a few thousand candidates on the first
+    real run, those two extra round trips each made this step slow enough to
+    blow past the ingress timeout (observed live 2026-08-18: the request
+    never came back, though the sync kept running server-side).
     """
     already_linked = {
         expert_id
@@ -201,6 +209,9 @@ def _provision_new_astrologers(db: Session) -> int:
     candidates = [
         row for row in db.scalars(select(ExpertPriority)).all() if row.expert_id not in already_linked
     ]
+    if not candidates:
+        return 0
+    kams = admin_mapping_client.fetch_active_kams(db)
 
     count = 0
     for priority_row in candidates:
@@ -235,8 +246,8 @@ def _provision_new_astrologers(db: Session) -> int:
             )
             continue
 
-        assignment = admin_mapping_client.get_assigned_admin(db, astrologer.id)
-        astrologer.assigned_admin_id = assignment.admin_id
+        kam = admin_mapping_client.pick_kam(kams, language=astrologer.language, index_id=astrologer.id)
+        astrologer.assigned_admin_id = kam.id
         count += 1
     return count
 
