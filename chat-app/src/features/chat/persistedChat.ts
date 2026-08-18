@@ -12,6 +12,16 @@ export interface PersistedChatState {
   // sees a feedback prompt and a "start a new chat" option instead of being
   // able to keep typing into the same thread (see ChatPage.tsx).
   chatClosed: boolean;
+  // Epoch ms of the last real interaction (a message actually sent) — an
+  // idle-too-long chat auto-resets rather than staying open indefinitely,
+  // carrying a stale conversation forward forever. See IDLE_RESET_MS.
+  lastActivityAt: number;
+}
+
+export const IDLE_RESET_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+export function isIdleExpired(state: PersistedChatState): boolean {
+  return Date.now() - state.lastActivityAt > IDLE_RESET_MS;
 }
 
 function storageKey(astrologerId: number): string {

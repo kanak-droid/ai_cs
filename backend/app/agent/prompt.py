@@ -8,7 +8,7 @@ _TITLE_PREFIXES = {
     "astro", "tarot", "acharya", "aacharya", "acharjee", "numero", "palmist",
     "palmistry", "facereader", "face", "reader", "vedic", "pandit", "life",
     "mystic", "jyotish", "jyotishi", "guruji", "guruma", "prashana", "vastu",
-    "nadi", "dr", "psychic", "taraputra",
+    "nadi", "dr", "psychic", "taraputra", "Intutive"
 }
 
 

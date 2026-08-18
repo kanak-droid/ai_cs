@@ -14,8 +14,13 @@ import { ChatComposer } from "../components/ChatComposer";
 import { FaqChips } from "../components/FaqChips";
 import { MessageList } from "../components/MessageList";
 import { TicketStatusBanner } from "../components/TicketStatusBanner";
-import { loadPersistedChat, savePersistedChat } from "../persistedChat";
+import { IDLE_RESET_MS, isIdleExpired, loadPersistedChat, savePersistedChat } from "../persistedChat";
 import type { DisplayMessage } from "../types";
+
+// Checked periodically (see the interval effect below) so a chat left open
+// and idle in the background still resets without needing a reload —
+// frequent enough to catch the 4-hour mark promptly, cheap enough not to matter.
+const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
 
 // A restored (persisted) session can already contain ids from before a
 // reload — an incrementing counter reset to 0 on module (re)load would risk
@@ -38,12 +43,13 @@ function toHistory(messages: DisplayMessage[]): ChatHistoryTurn[] {
 }
 
 function welcomeMessage(astrologer: { name: string } | null): DisplayMessage {
+  const greeting = astrologer
+    ? `Hi ${casualFirstName(astrologer.name)}, how can I help you today?`
+    : "Hi, how can I help you today?";
   return {
     id: "welcome",
     role: "assistant",
-    text: astrologer
-      ? `Hi ${casualFirstName(astrologer.name)}, how can I help you today?`
-      : "Hi, how can I help you today?",
+    text: `${greeting} (If this chat sits idle for 4 hours, it'll automatically reset and start fresh.)`,
     status: "sent",
   };
 }
@@ -60,7 +66,11 @@ export function ChatPage() {
   // (e.g. visiting "My Tickets" and coming back) and on a full reload.
   // sessionStorage rather than localStorage: it clears itself once the
   // webview tab actually closes, rather than persisting indefinitely on-device.
-  const persisted = astrologer ? loadPersistedChat(astrologer.astrologerId) : null;
+  const rawPersisted = astrologer ? loadPersistedChat(astrologer.astrologerId) : null;
+  // Idle too long — treat it as if nothing was persisted rather than
+  // resurrecting a stale conversation the astrologer has long since walked
+  // away from (see "Do One more thing" ask: reset after 4h of inactivity).
+  const persisted = rawPersisted && !isIdleExpired(rawPersisted) ? rawPersisted : null;
 
   // Persists across re-renders so a resolved ticket is announced exactly
   // once per webview visit, however many times the 15s ticket poll ticks
@@ -79,6 +89,11 @@ export function ChatPage() {
   // a completely unrelated new issue raised right after, and it visibly
   // affected its behavior on that new issue.
   const [chatClosed, setChatClosed] = useState(() => persisted?.chatClosed ?? false);
+  // A ref (not state) — read inside the idle-check interval and handleSend
+  // without needing either to be in a dependency array, and updated
+  // synchronously (unlike setState) so the very next save-effect run
+  // persists the up-to-date value.
+  const lastActivityAt = useRef<number>(persisted?.lastActivityAt ?? Date.now());
 
   useEffect(() => {
     if (!astrologer) return;
@@ -87,6 +102,7 @@ export function ChatPage() {
       messages,
       announcedResolvedTicketIds: Array.from(announcedResolvedTicketIds.current),
       chatClosed,
+      lastActivityAt: lastActivityAt.current,
     });
   }, [astrologer, sessionId, messages, chatClosed]);
 
@@ -95,7 +111,22 @@ export function ChatPage() {
     setSessionId(crypto.randomUUID());
     setMessages([welcomeMessage(astrologer)]);
     setChatClosed(false);
+    lastActivityAt.current = Date.now();
   }
+
+  // Covers the astrologer leaving the webview open in the background past
+  // the 4-hour mark without ever reloading it — without this, an idle chat
+  // would only reset the NEXT time the page happens to remount.
+  useEffect(() => {
+    const hasContentToReset = messages.length > 1 || chatClosed;
+    if (!hasContentToReset) return;
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityAt.current > IDLE_RESET_MS) {
+        handleStartNewChat();
+      }
+    }, IDLE_CHECK_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [messages.length, chatClosed]);
 
   // Proactively announce a ticket the moment it's resolved (admin side),
   // instead of leaving the astrologer to notice a passive banner — this is
@@ -139,6 +170,7 @@ export function ChatPage() {
     options?: { resolveMarker?: boolean },
   ) {
     const history = toHistory(messages);
+    lastActivityAt.current = Date.now();
     const outgoingId = makeId();
     const displayText = text || (attachment ? "Here's my photo/video." : "");
     const attachmentKind = attachment?.file.type.startsWith("video/") ? "video" : "image";
