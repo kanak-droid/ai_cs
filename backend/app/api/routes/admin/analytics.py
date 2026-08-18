@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db
@@ -11,7 +13,8 @@ router = APIRouter(tags=["admin"])
 
 @router.get("/api/admin/analytics", response_model=AnalyticsOverview)
 def get_analytics_overview(
+    priority: Literal["1", "2", "3", "4", "5", "unranked"] | None = Query(default=None),
     admin: AdminContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> AnalyticsOverview:
-    return AnalyticsOverview(**analytics_service.get_overview(db))
+    return AnalyticsOverview(**analytics_service.get_overview(db, priority=priority))
