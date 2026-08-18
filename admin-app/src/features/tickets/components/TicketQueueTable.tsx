@@ -1,6 +1,7 @@
 import type { AdminTicket } from "@astrohelp/shared";
 import { useNavigate } from "react-router-dom";
 
+import { useAdminsLookup } from "../api/useAdminsLookup";
 import { TicketStatusBadge } from "./TicketStatusBadge";
 
 function PriorityBadge({ priority }: { priority: number | null }) {
@@ -17,6 +18,37 @@ function PriorityBadge({ priority }: { priority: number | null }) {
   );
 }
 
+function AssignedToCell({
+  assignedAdminId,
+  assignedCsId,
+}: {
+  assignedAdminId: number | null;
+  assignedCsId: number | null;
+}) {
+  const { data: admins } = useAdminsLookup();
+  const kam = admins?.find((a) => a.id === assignedAdminId);
+  const cs = admins?.find((a) => a.id === assignedCsId);
+
+  if (!kam && !cs) return <span className="text-xs text-night/30">—</span>;
+
+  return (
+    <div className="flex flex-col gap-0.5 text-xs">
+      {kam && (
+        <span className="text-night">
+          <span className="text-night/40">KAM </span>
+          {kam.name}
+        </span>
+      )}
+      {cs && (
+        <span className="text-night">
+          <span className="text-night/40">CS </span>
+          {cs.name}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
   const navigate = useNavigate();
 
@@ -28,6 +60,7 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
             <th className="px-4 py-3 font-medium">Astrologer</th>
             <th className="px-4 py-3 font-medium">Issue</th>
             <th className="px-4 py-3 font-medium">Priority</th>
+            <th className="px-4 py-3 font-medium">Assigned to</th>
             <th className="px-4 py-3 font-medium">Status</th>
             <th className="px-4 py-3 font-medium">Created</th>
           </tr>
@@ -55,6 +88,12 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
               </td>
               <td className="px-4 py-3">
                 <PriorityBadge priority={ticket.astrologer.priority} />
+              </td>
+              <td className="px-4 py-3">
+                <AssignedToCell
+                  assignedAdminId={ticket.assigned_admin_id}
+                  assignedCsId={ticket.assigned_cs_id}
+                />
               </td>
               <td className="px-4 py-3">
                 <TicketStatusBadge status={ticket.status} />

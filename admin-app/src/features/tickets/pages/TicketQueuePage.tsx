@@ -23,7 +23,9 @@ export function TicketQueuePage() {
   const filters = {
     status: searchParams.get("status") ?? undefined,
     assignedAdminId,
-    sort: (searchParams.get("sort") as "asc" | "desc" | "priority") ?? "desc",
+    // Always highest-priority-first (P1 at top) — there's no sort control
+    // for this anymore; priority is what actually determines urgency here.
+    sort: "priority" as const,
   };
 
   const { data: tickets, status } = useTicketQueue(filters);

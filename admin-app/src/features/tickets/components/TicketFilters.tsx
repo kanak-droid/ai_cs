@@ -48,16 +48,6 @@ export function TicketFilters() {
           </option>
         ))}
       </select>
-
-      <select
-        value={searchParams.get("sort") ?? "desc"}
-        onChange={(e) => updateParam("sort", e.target.value)}
-        className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
-      >
-        <option value="desc">Newest first</option>
-        <option value="asc">Oldest first</option>
-        <option value="priority">Highest priority first</option>
-      </select>
     </div>
   );
 }
