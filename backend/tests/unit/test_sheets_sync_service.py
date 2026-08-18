@@ -202,19 +202,33 @@ def test_latest_payout_cycle_picks_the_most_recent_tab(monkeypatch):
     assert result == ("August 14", date(2026, 8, 14))
 
 
-def test_latest_payout_cycle_breaks_a_date_tie_toward_the_higher_cycle_number(monkeypatch):
-    # The real sheet has multiple tabs per date ("Aug 14 - 1", "Aug 14 - 2",
-    # sometimes "- 3") — the highest-numbered one is assumed to be the most
-    # complete/final version of that date's data.
+def test_latest_payout_cycle_breaks_a_date_tie_toward_cycle_number_one(monkeypatch):
+    # The real sheet has multiple tabs per date — confirmed with ops
+    # 2026-08-18: "-1" is AstroLokal's own sheet, "-2" is a Razorpay-
+    # formatted copy for payment processing, and "-1" is always the right
+    # one — NOT "whichever number is highest" (an earlier wrong guess that
+    # could pick Razorpay's copy, or any other stray numbered tab, instead).
     monkeypatch.setattr(
         sheets_client,
         "list_tab_titles",
-        lambda spreadsheet_id: ["Aug 14 - 1", "Aug 14 - 3", "Aug 14 - 2"],
+        lambda spreadsheet_id: ["Aug 14 - 2", "Aug 14 - 3", "Aug 14 - 1"],
     )
 
     result = sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18))
 
-    assert result == ("Aug 14 - 3", date(2026, 8, 14))
+    assert result == ("Aug 14 - 1", date(2026, 8, 14))
+
+
+def test_latest_payout_cycle_falls_back_when_no_cycle_one_tab_exists(monkeypatch):
+    monkeypatch.setattr(
+        sheets_client,
+        "list_tab_titles",
+        lambda spreadsheet_id: ["Aug 14 - 3", "Aug 14 - 2"],
+    )
+
+    result = sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18))
+
+    assert result == ("Aug 14 - 2", date(2026, 8, 14))
 
 
 def test_latest_payout_cycle_returns_none_when_listing_tabs_fails(monkeypatch):

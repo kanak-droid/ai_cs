@@ -67,11 +67,15 @@ _MONTH_NAME_TO_NUMBER = {
 # the date at all, so only the leading "Month Day" is matched.
 _CYCLE_TAB_DATE_RE = re.compile(r"^([A-Za-z]+)\s+(\d{1,2})")
 # The real sheet has multiple tabs per date ("Aug 14 - 1", "Aug 14 - 2",
-# occasionally "- 3") — assumed to be sequential batches within the same
-# cycle, so the highest-numbered one is the most complete/final version of
-# that date's data. Matched separately from the date itself since the
-# spacing around the dash is inconsistent ("Jun 19 -1", "Sep 26-3").
+# occasionally a stray "- 3") — these are NOT sequential revisions of the
+# same data. Per ops (2026-08-18): "-1" is AstroLokal's own sheet, "-2" is
+# a Razorpay-formatted copy for payment processing, and we always want "-1"
+# specifically — "pick the highest number" (an earlier, wrong assumption)
+# can silently pick Razorpay's copy, or some other stray tab, instead.
+# Matched separately from the date itself since the spacing around the
+# dash is inconsistent ("Jun 19 -1", "Sep 26-3").
 _CYCLE_NUMBER_RE = re.compile(r"-\s*(\d+)")
+_CANONICAL_CYCLE_NUMBER = 1
 
 
 def _parse_cycle_tab_date(title: str, today: date) -> date | None:
@@ -132,10 +136,21 @@ def _latest_payout_cycle(today: date) -> tuple[str, date] | None:
     ]
     if not dated:
         return None
-    # Ties on date (e.g. "Aug 14 - 1" and "Aug 14 - 2") break toward the
-    # higher cycle number — see _CYCLE_NUMBER_RE's comment.
-    title, cycle_date = max(dated, key=lambda pair: (pair[1], _cycle_number(pair[0])))
-    return title, cycle_date
+    max_date = max(cycle_date for _, cycle_date in dated)
+    same_date = [(title, cycle_date) for title, cycle_date in dated if cycle_date == max_date]
+    # Always "-1" specifically — see _CYCLE_NUMBER_RE's comment. Falls back
+    # to whichever cycle number is lowest if "-1" isn't there for some
+    # reason (shouldn't happen per ops, but better than returning nothing).
+    for title, cycle_date in same_date:
+        if _cycle_number(title) == _CANONICAL_CYCLE_NUMBER:
+            return title, cycle_date
+    logger.warning(
+        "No cycle-1 tab found for the latest payout date %s among %s — falling back to the "
+        "lowest cycle number available",
+        max_date,
+        [title for title, _ in same_date],
+    )
+    return min(same_date, key=lambda pair: _cycle_number(pair[0]))
 
 
 def _next_payout_date(latest_cycle_date: date, today: date) -> date:
