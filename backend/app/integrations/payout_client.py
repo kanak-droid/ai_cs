@@ -30,6 +30,13 @@ class PayoutStatus:
     kyc_status: str | None = None
     tds_deducted_percent: str | None = None
     tds_amount_inr: int | None = None
+    # The sheet's own Incentive column — synced into SheetPayoutStatus all
+    # along, but never actually surfaced here until now (confirmed live
+    # 2026-08-18: an astrologer with a real nonzero incentive asked about it
+    # and was told AstroLokal has no incentive scheme at all — the model
+    # wasn't wrong to say payouts are the real earnings mechanism, but this
+    # field being missing meant it couldn't also report the actual number).
+    incentive_inr: int | None = None
 
 
 def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> PayoutStatus | None:
@@ -57,6 +64,7 @@ def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> Payo
         kyc_status=synced.kyc_status,
         tds_deducted_percent=synced.tds_deducted_percent,
         tds_amount_inr=synced.tds_amount,
+        incentive_inr=synced.incentive,
     )
 
 

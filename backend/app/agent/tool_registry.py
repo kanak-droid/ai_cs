@@ -49,6 +49,8 @@ def _handle_get_payout_status(tool_input: dict, ctx: SessionContext) -> ToolResu
     )
     if result.wallet_balance_inr is not None:
         content += f" wallet_balance_inr={result.wallet_balance_inr}"
+    if result.incentive_inr is not None:
+        content += f" incentive_inr={result.incentive_inr}"
     # TDS is the most common reason a payout looks lower than expected —
     # incomplete KYC means a much higher rate. Only present when this
     # astrologer has a real linked payout row (see payout_client.py).

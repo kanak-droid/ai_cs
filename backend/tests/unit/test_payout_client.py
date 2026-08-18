@@ -51,3 +51,27 @@ def test_real_payout_status_falls_back_when_cycle_info_is_missing(db_session, se
     result = payout_client.get_payout_status(db_session, astrologer.id)
 
     assert result.scheduled_date == "not tracked — could not determine the next cycle"
+
+
+def test_real_payout_status_reports_the_actual_incentive(db_session, seeded_admin):
+    # Confirmed live 2026-08-18: this field was synced from the sheet into
+    # SheetPayoutStatus all along but never actually surfaced on
+    # PayoutStatus, so an astrologer with a real nonzero incentive was told
+    # AstroLokal has no incentive scheme at all.
+    astrologer = Astrologer(
+        name="Linked Astrologer",
+        phone="+91-1",
+        language="English",
+        expert_id=703,
+        user_id=90703,
+        assigned_admin_id=seeded_admin.id,
+    )
+    db_session.add(astrologer)
+    db_session.add(
+        SheetPayoutStatus(expert_id=703, status="processed", total_after_tax=9000, incentive=6088)
+    )
+    db_session.commit()
+
+    result = payout_client.get_payout_status(db_session, astrologer.id)
+
+    assert result.incentive_inr == 6088
