@@ -11,12 +11,6 @@ from google.genai import types
 from app.agent import vertex_client
 from app.core.config import settings
 
-# Placeholder pending the exact key/value ops wants for billing attribution
-# (2026-08-18) — see app/agent/client.py's identical constant. Distinct
-# from the main chat loop's label so Vertex AI's billing breakdown can tell
-# the two flows apart.
-_BILLING_LABELS = {"flow": "screenshot_analysis"}
-
 # The orchestrator model writes `question` itself, and how leading it is
 # varies by conversation — verified live that a leading question ("Does this
 # payout screen show a different amount than expected?") makes Gemini
@@ -44,6 +38,6 @@ def analyze_image(image_url: str, question: str) -> str:
             types.Part.from_bytes(data=image_response.content, mime_type=mime_type),
             question + _GROUNDING_SUFFIX,
         ],
-        config=types.GenerateContentConfig(labels=_BILLING_LABELS),
+        config=types.GenerateContentConfig(labels=vertex_client.billing_labels()),
     )
     return response.text or "Couldn't make out anything specific in that screenshot."

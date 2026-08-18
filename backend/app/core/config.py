@@ -40,15 +40,25 @@ class Settings(BaseSettings):
     # dashboard later works normally from then on, same as any other admin.
     OWNER_EMAIL: str = "parth.a@getlokalapp.com"
 
-    # Gemini, via Vertex AI (not a plain API key, as of 2026-08-18 — ops
-    # wants production off bare Gemini API keys, and billing needs to be
-    # attributable per request, which Vertex AI's request labels give us).
-    # GEMINI_VERTEX_CREDENTIALS_JSON is a GCP service account's JSON, same
-    # env-var convention (and parsing) as GOOGLE_SHEETS_CREDENTIALS_JSON.
+    # Only used to build the Gemini billing label below ("production" or
+    # "dev" — per the org's Vertex AI migration guide, 2026-08-18). Set this
+    # per Devtron environment (production Secret -> "production", every
+    # dev/staging Secret -> "dev").
+    ENVIRONMENT: str = "dev"
+
+    # Gemini, via Vertex AI (not a plain API key, as of 2026-08-18 — org
+    # policy is off bare Gemini API keys, since usage on one lands in a
+    # single untagged billing bucket nobody can attribute to a team/use
+    # case). GEMINI_VERTEX_CREDENTIALS_JSON is a GCP service account's JSON,
+    # same env-var convention (and parsing) as GOOGLE_SHEETS_CREDENTIALS_JSON.
     GOOGLE_CLOUD_PROJECT: str = ""
-    GOOGLE_CLOUD_LOCATION: str = "us-central1"
+    GOOGLE_CLOUD_LOCATION: str = "global"
     GEMINI_VERTEX_CREDENTIALS_JSON: str = ""
     GEMINI_MODEL: str = "gemini-flash-latest"
+    # The "{environment}_{feature}" billing label's feature half — see the
+    # org's shared label-format guide. Coordinate with other teams before
+    # changing this; it's the bucket cost gets attributed to.
+    GEMINI_BILLING_FEATURE: str = "supply_help"
 
     # Mocked integrations
     MOCK_MODE: bool = True

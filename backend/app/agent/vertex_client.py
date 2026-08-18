@@ -34,3 +34,14 @@ def build_vertex_client() -> genai.Client:
         location=settings.GOOGLE_CLOUD_LOCATION,
         credentials=credentials,
     )
+
+
+def billing_labels() -> dict[str, str]:
+    """The org-wide label every Gemini call must carry (shared migration
+    guide, 2026-08-18): key "billing_category", value
+    "{environment}_{feature}", all lowercase, underscore-joined — e.g.
+    "production_supply_help". Same value for every call site in this
+    codebase (chat loop, screenshot analysis) rather than a finer per-flow
+    breakdown, since the shared format is explicitly just these two parts.
+    """
+    return {"billing_category": f"{settings.ENVIRONMENT}_{settings.GEMINI_BILLING_FEATURE}"}

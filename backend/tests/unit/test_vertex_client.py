@@ -41,3 +41,13 @@ def test_build_vertex_client_wires_project_location_and_credentials(monkeypatch)
         "location": "asia-south1",
         "credentials": fake_credentials,
     }
+
+
+def test_billing_labels_follow_the_shared_environment_feature_format(monkeypatch):
+    # Org-wide convention (2026-08-18): key "billing_category", value
+    # "{environment}_{feature}", lowercase, underscore-joined — e.g.
+    # "production_supply_help". Same for every call site in this codebase.
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "GEMINI_BILLING_FEATURE", "supply_help")
+
+    assert vertex_client.billing_labels() == {"billing_category": "production_supply_help"}
