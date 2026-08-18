@@ -10,6 +10,7 @@ from app.models.enums import SessionResolution
 
 if TYPE_CHECKING:
     from app.models.astrologer import Astrologer
+    from app.models.chat_message import ChatMessage
     from app.models.ticket import Ticket
 
 
@@ -45,3 +46,7 @@ class ChatSession(Base):
 
     astrologer: Mapped["Astrologer"] = relationship()
     ticket: Mapped["Ticket | None"] = relationship()
+    # Only populated for sessions started after 2026-08-18 — see
+    # ChatMessage's docstring. Ordered so the admin dashboard's transcript
+    # view reads top-to-bottom without re-sorting.
+    messages: Mapped[list["ChatMessage"]] = relationship(order_by="ChatMessage.created_at")

@@ -8,6 +8,7 @@ clients, or direct executor calls in tests) so a logging gap never breaks chat.
 from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
+from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
 from app.models.enums import SessionResolution
 
@@ -21,6 +22,19 @@ def get_or_create_session(db: Session, session_id: str | None, astrologer_id: in
         db.add(session)
         db.flush()
     return session
+
+
+def record_message(db: Session, session: ChatSession | None, *, role: str, text: str) -> None:
+    """Persists one turn's raw text for the admin dashboard's chat-log view
+    (added 2026-08-18) — before this, no message content was ever stored,
+    only ChatSession's resolution metadata. Best-effort/no-op without a
+    session, same as everything else in this file, so a logging gap never
+    breaks the actual chat.
+    """
+    if session is None:
+        return
+    db.add(ChatMessage(session_id=session.id, role=role, text=text))
+    db.flush()
 
 
 def mark_resolved_by_bot(

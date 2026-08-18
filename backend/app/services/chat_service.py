@@ -36,7 +36,8 @@ def handle_chat_turn(
     client: AgentClient | None = None,
 ) -> ChatTurnResult:
     history = history or []
-    chat_session_service.get_or_create_session(db, session_id, astrologer.astrologer_id)
+    session = chat_session_service.get_or_create_session(db, session_id, astrologer.astrologer_id)
+    chat_session_service.record_message(db, session, role="astrologer", text=message)
     ctx = SessionContext(
         astrologer_id=astrologer.astrologer_id,
         name=astrologer.name,
@@ -48,5 +49,6 @@ def handle_chat_turn(
     )
     agent_history = [HistoryTurn(role=turn.role, text=turn.text) for turn in history]
     result = run_chat_turn(client or get_agent_client(), ctx, message, history=agent_history)
+    chat_session_service.record_message(db, session, role="assistant", text=result.reply)
     db.commit()
     return result

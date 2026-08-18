@@ -370,21 +370,11 @@ def list_all_tickets(
     if sort == "priority":
         stmt = stmt.order_by(Ticket.created_at.desc())
         tickets = list(db.scalars(stmt).all())
-        tickets.sort(key=lambda t: _priority_for_sort(db, t.astrologer_id))
+        tickets.sort(key=lambda t: queue_performance_client.priority_sort_key(db, t.astrologer_id))
         return tickets
 
     stmt = stmt.order_by(Ticket.created_at.desc() if sort == "desc" else Ticket.created_at.asc())
     return list(db.scalars(stmt).all())
-
-
-_UNRANKED_SORT_VALUE = 999
-
-
-def _priority_for_sort(db: Session, astrologer_id: int) -> int:
-    priority = queue_performance_client.get_queue_performance(db, astrologer_id).priority
-    # Unranked sorts after every real P1-P5 ticket, not before (None can't
-    # be compared to an int).
-    return priority if priority is not None else _UNRANKED_SORT_VALUE
 
 
 def attach_astrologer_priority(db: Session, tickets: list[Ticket]) -> None:
@@ -399,5 +389,5 @@ def attach_astrologer_priority(db: Session, tickets: list[Ticket]) -> None:
     for ticket in tickets:
         astrologer_id = ticket.astrologer_id
         if astrologer_id not in cache:
-            cache[astrologer_id] = _priority_for_sort(db, astrologer_id)
+            cache[astrologer_id] = queue_performance_client.priority_sort_key(db, astrologer_id)
         ticket.astrologer.priority = cache[astrologer_id]

@@ -53,6 +53,20 @@ def _real_queue_performance(
     )
 
 
+UNRANKED_SORT_VALUE = 999
+
+
+def priority_sort_key(db: Session, astrologer_id: int) -> int:
+    """Same real-priority-or-unranked lookup as get_queue_performance,
+    projected to a plain sortable int — unranked sorts after every real
+    P1-P5 value, not before (None can't be compared to an int). Shared by
+    ticket_service (ticket queue sort) and chat_log_service (chat-log sort)
+    so "highest priority first" means the same thing in both places.
+    """
+    priority = get_queue_performance(db, astrologer_id).priority
+    return priority if priority is not None else UNRANKED_SORT_VALUE
+
+
 def get_queue_performance(db: Session, astrologer_id: int) -> QueuePerformance:
     astrologer = db.get(Astrologer, astrologer_id)
     if astrologer and astrologer.expert_id:

@@ -1,5 +1,6 @@
 from app.models.admin import Admin
 from app.models.astrologer import Astrologer
+from app.models.chat_message import ChatMessage
 from app.models.chat_session import ChatSession
 from app.models.email_log import EmailLog
 from app.models.enums import SessionResolution, TicketStatus
@@ -18,6 +19,7 @@ from app.models.ticket_status_history import TicketStatusHistory
 __all__ = [
     "Admin",
     "Astrologer",
+    "ChatMessage",
     "ChatSession",
     "EmailLog",
     "SessionResolution",

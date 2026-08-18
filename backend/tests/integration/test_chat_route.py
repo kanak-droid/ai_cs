@@ -1,7 +1,35 @@
 from app.integrations import queue_performance_client
 from app.integrations.queue_performance_client import QueuePerformance
+from app.models.chat_message import ChatMessage
+from app.models.chat_session import ChatSession
 from app.services import chat_service
 from tests.unit.test_agent_tool_selection import FakeAgentClient, text_response, tool_call_response
+
+
+def test_chat_route_persists_both_turns_for_the_admin_chat_log(
+    client, db_session, astrologer_auth_header, monkeypatch
+):
+    fake_client = FakeAgentClient([text_response("Sure, here's the answer.")])
+    monkeypatch.setattr(chat_service, "get_agent_client", lambda: fake_client)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "What's my payout?", "session_id": "session-persist-1"},
+        headers=astrologer_auth_header,
+    )
+
+    assert response.status_code == 200
+    session = db_session.query(ChatSession).filter_by(session_id="session-persist-1").one()
+    messages = (
+        db_session.query(ChatMessage)
+        .filter_by(session_id=session.id)
+        .order_by(ChatMessage.id)
+        .all()
+    )
+    assert [(m.role, m.text) for m in messages] == [
+        ("astrologer", "What's my payout?"),
+        ("assistant", "Sure, here's the answer."),
+    ]
 
 
 def test_chat_route_returns_reply_and_trace(client, astrologer_auth_header, monkeypatch):
