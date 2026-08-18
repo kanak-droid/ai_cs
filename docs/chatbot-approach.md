@@ -1143,3 +1143,45 @@ directly against `Astrologer.user_id` (`auth_service.resolve_astrologer_by_user_
 — matching how the real AstroLokal app's banner hand-off actually works,
 with no shared secret on that side at all. The admin token (JWT) is
 unaffected.
+
+## 15. Removed `get_salary_details` — astrologers aren't paid a salary (2026-08-18)
+
+Confirmed live: an astrologer asked "how is my salary calculated" and was
+told a specific monthly figure and revision date with full confidence.
+Traced to the exact mocked formula in `salary_client.py`
+(`15000 + (astrologer_id * 311) % 25000`) — for that astrologer's real id,
+it produces precisely the number reported. This wasn't the model
+hallucinating; it was correctly relaying a tool result, and the tool's
+result was 100% fabricated with no real or seed data behind it at all
+(unlike `payout_client`/`kyc_client`, which fall back to real sheet data
+for any astrologer ops has linked).
+
+More fundamentally: "salary" was never the right concept for this
+product. Astrologers are paid per call/booking via the payout cycle
+(`get_payout_status`), not a fixed monthly salary — the tool and the
+"How is my salary calculated?" FAQ chip both encoded an assumption that
+doesn't match how AstroLokal actually compensates astrologers at all.
+
+Fix: `get_salary_details` removed from the model's toolset (same
+kept-but-unregistered pattern as `trigger_photo_beautify` — a one-line
+re-enable if a real integration and a real "salary" concept ever exist),
+the FAQ chip removed, and the prompt now explicitly says there's no fixed
+salary and to check payout status instead if asked. Also tightened the
+"never invent a number" instruction to be unambiguous: general,
+non-numeric explanations may come from the model's own knowledge, but any
+number/date/status must always trace back to an actual tool call from
+that conversation — never a pattern-matched guess.
+
+Separately, the same investigation caught a real bug in the payout-cycle
+auto-detection added in §14's sync work: it only recognized full month
+names ("August"), but the real payout sheet's tab titles mostly use
+3-letter abbreviations ("Aug 14"). Every abbreviated tab — which included
+the actual latest ones — silently failed to parse, so the "latest cycle"
+detection quietly fell back to the newest full-name tab instead ("July
+31"), weeks stale. A second bug in the same code: resolving a tab's
+missing year by "whichever candidate is numerically closest to today"
+picked a date months in the *future* for tabs from earlier in the
+calendar year (e.g. a "Jan 30" tab seen in August resolved to next
+January, since ~165 days away is numerically closer than the ~200-day-old
+January that already happened) — despite these tabs never actually being
+for a future cycle. Both fixed in `sheets_sync_service.py`.

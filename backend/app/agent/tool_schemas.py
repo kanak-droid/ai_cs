@@ -32,6 +32,10 @@ GET_PRIORITY_RANKING = {
     "input_schema": {"type": "object", "properties": {}},
 }
 
+# GET_SALARY_DETAILS intentionally left out of ALL_TOOLS below — see its
+# comment there. Kept defined here (unused) so wiring in a real salary
+# integration later is a one-line change, same convention as
+# TRIGGER_PHOTO_BEAUTIFY.
 GET_SALARY_DETAILS = {
     "name": "get_salary_details",
     "description": "Get the current astrologer's monthly salary and revision dates.",
@@ -186,8 +190,18 @@ ALL_TOOLS = [
     GET_PAYOUT_STATUS,
     GET_KYC_STATUS,
     GET_PRIORITY_RANKING,
-    GET_SALARY_DETAILS,
     GET_ASSIGNED_ADMIN,
+    # GET_SALARY_DETAILS intentionally left out of the model's toolset —
+    # there is no real salary integration (salary_client.py is 100% mocked,
+    # a plausible-looking but entirely fabricated number derived from
+    # astrologer_id — no seed data or sheet backs it at all), and
+    # astrologers aren't actually paid a fixed salary in the first place —
+    # they're paid via payout per call/booking, which get_payout_status
+    # already covers with real data. Confirmed live 2026-08-18: an
+    # astrologer asking "how is my salary calculated" was told a specific
+    # fabricated number (₹20,304) and a fake revision date with complete
+    # confidence — the model was correctly relaying the tool's result, the
+    # tool itself was the problem. See app/agent/prompt.py.
     # TRIGGER_PHOTO_BEAUTIFY intentionally left out of the model's toolset —
     # the n8n beautify workflow is on hold (2026-08-14); Photo Change tickets
     # currently carry the astrologer's original, unedited photo instead. See

@@ -1,7 +1,6 @@
 const FAQS = [
   "When will my payout arrive?",
   "Why was my KYC rejected?",
-  "How is my salary calculated?",
   "Who is my point of contact?",
   "How do I change my profile photo?",
 ];

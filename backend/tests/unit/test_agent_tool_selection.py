@@ -1,8 +1,9 @@
 from google.genai import types
 
-from app.agent import executor
+from app.agent import executor, tool_schemas
 from app.agent.context import SessionContext
 from app.agent.orchestrator import MAX_ITERATIONS, HistoryTurn, run_chat_turn
+from app.agent.tool_registry import REGISTRY
 from app.integrations import payout_client, queue_performance_client
 from app.integrations.queue_performance_client import QueuePerformance
 
@@ -529,3 +530,13 @@ def test_orchestrator_stops_at_max_iterations(db_session):
 
     assert len(fake_client.calls) == MAX_ITERATIONS
     assert len(result.trace) == MAX_ITERATIONS
+
+
+def test_get_salary_details_is_not_offered_to_the_model():
+    # salary_client.py is 100% mocked with no real data source at all (no
+    # sheet, no seed data) — confirmed live 2026-08-18: it told a real
+    # astrologer a specific fabricated salary figure and revision date with
+    # full confidence. Must never be something the model can call until (if
+    # ever) a real salary integration exists.
+    assert "get_salary_details" not in {tool["name"] for tool in tool_schemas.ALL_TOOLS}
+    assert "get_salary_details" not in REGISTRY

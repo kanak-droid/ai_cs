@@ -53,10 +53,15 @@ def _handle_get_payout_status(tool_input: dict, ctx: SessionContext) -> ToolResu
     # incomplete KYC means a much higher rate. Only present when this
     # astrologer has a real linked payout row (see payout_client.py).
     if result.tds_deducted_percent is not None:
+        # Only present for a real linked payout row — also the signal that
+        # scheduled_date above came from the real, sheet-derived cadence
+        # below, not the unrelated mocked fallback pattern (which has
+        # nothing to do with alternate Fridays at all).
         content += (
             f" this_cycle_kyc_status={result.kyc_status} "
             f"tds_deducted_percent={result.tds_deducted_percent} "
-            f"tds_amount_inr={result.tds_amount_inr}"
+            f"tds_amount_inr={result.tds_amount_inr} "
+            f"payout_cadence=\"runs every alternate Friday\""
         )
     return ToolResult(content_for_model=content, summary_for_trace="Checked your payout status")
 
@@ -283,11 +288,11 @@ REGISTRY: dict[str, ToolSpec] = {
         ToolSpec("get_payout_status", _handle_get_payout_status),
         ToolSpec("get_kyc_status", _handle_get_kyc_status),
         ToolSpec("get_priority_ranking", _handle_get_priority_ranking),
-        ToolSpec("get_salary_details", _handle_get_salary_details),
         ToolSpec("get_assigned_admin", _handle_get_assigned_admin),
-        # trigger_photo_beautify intentionally not registered — see
-        # tool_schemas.py's ALL_TOOLS comment. Handler kept below, unused,
-        # so re-enabling this later is a one-line change in both files.
+        # get_salary_details and trigger_photo_beautify intentionally not
+        # registered — see tool_schemas.py's ALL_TOOLS comment. Handlers
+        # kept below, unused, so re-enabling either later is a one-line
+        # change in both files.
         ToolSpec("analyze_screenshot", _handle_analyze_screenshot),
         ToolSpec("create_support_ticket", _handle_create_support_ticket),
         ToolSpec("get_tickets", _handle_get_tickets),
