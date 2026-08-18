@@ -33,9 +33,13 @@ _APOLOGY_REPLY = "Sorry, I couldn't process that — could you try again?"
 # non-deterministic sampling variance, not a permanent failure. A broad
 # smoke test across many real conversations found this landed on ~16% of
 # turns even after 3 attempts each, so retrying resolves most but not all
-# of these — 5 attempts is still cheap on this model and meaningfully
-# lowers the residual apology rate.
-_MAX_GENERATE_ATTEMPTS = 5
+# of these. Bumped 5 -> 7 (2026-08-18) after live testing of the
+# create_support_ticket flow specifically: it has more/longer arguments
+# (category, sub_category, description, description_en, attachment_url)
+# than most other tools, and hit exhausted-retry apologies noticeably more
+# often than simple lookups in that same test batch — worth a wider budget
+# on the one call this whole ticket-raising fix depends on landing.
+_MAX_GENERATE_ATTEMPTS = 7
 
 
 def _is_usable(response: types.GenerateContentResponse) -> bool:
