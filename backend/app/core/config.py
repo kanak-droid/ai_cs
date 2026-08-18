@@ -40,8 +40,14 @@ class Settings(BaseSettings):
     # dashboard later works normally from then on, same as any other admin.
     OWNER_EMAIL: str = "parth.a@getlokalapp.com"
 
-    # Gemini
-    GEMINI_API_KEY: str = ""
+    # Gemini, via Vertex AI (not a plain API key, as of 2026-08-18 — ops
+    # wants production off bare Gemini API keys, and billing needs to be
+    # attributable per request, which Vertex AI's request labels give us).
+    # GEMINI_VERTEX_CREDENTIALS_JSON is a GCP service account's JSON, same
+    # env-var convention (and parsing) as GOOGLE_SHEETS_CREDENTIALS_JSON.
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_CLOUD_LOCATION: str = "us-central1"
+    GEMINI_VERTEX_CREDENTIALS_JSON: str = ""
     GEMINI_MODEL: str = "gemini-flash-latest"
 
     # Mocked integrations

@@ -6,10 +6,16 @@ not a turn in the ongoing conversation.
 """
 
 import httpx
-from google import genai
 from google.genai import types
 
+from app.agent import vertex_client
 from app.core.config import settings
+
+# Placeholder pending the exact key/value ops wants for billing attribution
+# (2026-08-18) — see app/agent/client.py's identical constant. Distinct
+# from the main chat loop's label so Vertex AI's billing breakdown can tell
+# the two flows apart.
+_BILLING_LABELS = {"flow": "screenshot_analysis"}
 
 # The orchestrator model writes `question` itself, and how leading it is
 # varies by conversation — verified live that a leading question ("Does this
@@ -31,12 +37,13 @@ def analyze_image(image_url: str, question: str) -> str:
     image_response.raise_for_status()
     mime_type = image_response.headers.get("content-type", "image/jpeg").split(";")[0]
 
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    client = vertex_client.build_vertex_client()
     response = client.models.generate_content(
         model=settings.GEMINI_MODEL,
         contents=[
             types.Part.from_bytes(data=image_response.content, mime_type=mime_type),
             question + _GROUNDING_SUFFIX,
         ],
+        config=types.GenerateContentConfig(labels=_BILLING_LABELS),
     )
     return response.text or "Couldn't make out anything specific in that screenshot."
