@@ -46,6 +46,20 @@ export interface CategoryCount {
   count: number;
 }
 
+export interface KamPerformance {
+  admin_id: number;
+  name: string;
+  role: AdminRole;
+  pending_count: number;
+  assigned_count: number;
+  solved_count: number;
+  // Average hours from ticket creation to resolution, for tickets they
+  // solved — null if they haven't solved any yet.
+  avg_tat_hours: number | null;
+}
+
+export type PriorityFilter = "1" | "2" | "3" | "4" | "5" | "unranked";
+
 export interface AnalyticsOverview {
   bot_resolved_count: number;
   escalated_count: number;
@@ -56,4 +70,5 @@ export interface AnalyticsOverview {
   unsatisfied_count: number;
   avg_bot_rating: number | null;
   rating_distribution: Record<string, number>;
+  kam_performance: KamPerformance[];
 }

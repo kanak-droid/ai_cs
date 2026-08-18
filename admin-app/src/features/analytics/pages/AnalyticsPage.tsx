@@ -1,8 +1,22 @@
+import type { PriorityFilter } from "@astrohelp/shared";
+import { useSearchParams } from "react-router-dom";
+
 import { EmptyState } from "../../../components/EmptyState";
 import { Spinner } from "../../../components/Spinner";
 import { useAnalytics } from "../api/useAnalytics";
+import { KamPerformanceTable } from "../components/KamPerformanceTable";
 import { StatCard } from "../components/StatCard";
 import { TopCategoriesList } from "../components/TopCategoriesList";
+
+const PRIORITY_OPTIONS: { value: PriorityFilter | ""; label: string }[] = [
+  { value: "", label: "All priorities" },
+  { value: "1", label: "P1" },
+  { value: "2", label: "P2" },
+  { value: "3", label: "P3" },
+  { value: "4", label: "P4" },
+  { value: "5", label: "P5" },
+  { value: "unranked", label: "Unranked" },
+];
 
 function formatSeconds(seconds: number | null): string {
   if (seconds === null) return "—";
@@ -17,7 +31,9 @@ function formatHours(hours: number | null): string {
 }
 
 export function AnalyticsPage() {
-  const { data: overview, status } = useAnalytics();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const priority = (searchParams.get("priority") as PriorityFilter | null) ?? undefined;
+  const { data: overview, status } = useAnalytics(priority);
 
   if (status === "pending") return <Spinner label="Loading analytics…" />;
   if (status === "error" || !overview) return <EmptyState title="Couldn't load analytics" />;
@@ -30,11 +46,32 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-night">Analytics</h1>
-        <p className="text-sm text-night/50">
-          How AstroHelp is doing across every conversation, not just tickets.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-night">Analytics</h1>
+          <p className="text-sm text-night/50">
+            How AstroHelp is doing across every conversation, not just tickets.
+          </p>
+        </div>
+        <select
+          value={priority ?? ""}
+          onChange={(e) => {
+            const next = new URLSearchParams(searchParams);
+            if (e.target.value) {
+              next.set("priority", e.target.value);
+            } else {
+              next.delete("priority");
+            }
+            setSearchParams(next);
+          }}
+          className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
+        >
+          {PRIORITY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -75,6 +112,13 @@ export function AnalyticsPage() {
       <div className="rounded-2xl bg-white p-4 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold text-night">Most common issues</h2>
         <TopCategoriesList categories={overview.top_categories} />
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-night/40">
+          KAM / CS performance
+        </h2>
+        <KamPerformanceTable rows={overview.kam_performance} />
       </div>
     </div>
   );
