@@ -274,12 +274,21 @@ export function ChatPage() {
           </button>
         </div>
       ) : (
-        <>
+        <div className="bg-white">
           {messages.length === 1 && (
             <FaqChips onPick={(question) => handleSend(question)} disabled={sendMessage.isPending} />
           )}
           <ChatComposer onSend={handleSend} disabled={sendMessage.isPending} />
-        </>
+          <div className="flex justify-center border-t border-night/5 py-1.5">
+            <button
+              type="button"
+              onClick={handleStartNewChat}
+              className="text-xs font-medium text-night/40 underline decoration-night/20 hover:text-night/60"
+            >
+              Start a new chat
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
