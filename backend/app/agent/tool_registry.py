@@ -43,6 +43,16 @@ class ToolSpec:
 
 def _handle_get_payout_status(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = payout_client.get_payout_status(ctx.db, ctx.astrologer_id)
+    if result.status == "no_record_this_cycle":
+        content = (
+            "no_payout_record_found_for_most_recent_cycle=true "
+            "(tell them plainly that no payout record was found for them in the most "
+            "recently synced cycle — never guess or state an amount/date for it; suggest "
+            "checking with their KAM if this seems wrong) | "
+            f"next_payout_cycle: date={result.scheduled_date} "
+            "(a separate, later cycle that hasn't happened yet — its amount is not known yet)"
+        )
+        return ToolResult(content_for_model=content, summary_for_trace="Checked your payout status")
     # amount_inr and scheduled_date are NOT the same cycle — confirmed live
     # 2026-08-18: the model was told amount_inr=767, scheduled_date=<future
     # date>, and reasonably but wrongly concluded "767 will be paid on that

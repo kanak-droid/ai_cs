@@ -53,6 +53,41 @@ def test_real_payout_status_falls_back_when_cycle_info_is_missing(db_session, se
     assert result.scheduled_date == "not tracked — could not determine the next cycle"
 
 
+def test_real_astrologer_missing_from_latest_cycle_gets_an_honest_no_record_status(
+    db_session, seeded_admin
+):
+    # Confirmed live 2026-08-19: a real, ops-linked astrologer absent from
+    # the latest synced payout tab used to silently fall through to the
+    # mocked/demo fallback, which produced a confident, plausible-looking
+    # but entirely fabricated amount and dates. Must never do that for
+    # anyone with a real expert_id — say plainly there's no record instead.
+    astrologer = Astrologer(
+        name="Missing This Cycle",
+        phone="+91-1",
+        language="English",
+        expert_id=704,
+        user_id=90704,
+        assigned_admin_id=seeded_admin.id,
+    )
+    db_session.add(astrologer)
+    db_session.add(
+        PayoutCycleInfo(
+            id=1,
+            latest_cycle_tab="Aug 14 - 1",
+            latest_cycle_date=date(2026, 8, 14),
+            next_payout_date=date(2026, 8, 28),
+        )
+    )
+    # Deliberately no SheetPayoutStatus row for expert_id=704.
+    db_session.commit()
+
+    result = payout_client.get_payout_status(db_session, astrologer.id)
+
+    assert result.status == "no_record_this_cycle"
+    assert result.scheduled_date == "2026-08-28"
+    assert "no record found" in result.last_paid_date
+
+
 def test_real_payout_status_reports_the_actual_incentive(db_session, seeded_admin):
     # Confirmed live 2026-08-18: this field was synced from the sheet into
     # SheetPayoutStatus all along but never actually surfaced on

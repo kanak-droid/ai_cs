@@ -19,6 +19,9 @@ from app.models.sheet_sync import SheetPayoutStatus
 class PayoutStatus:
     astrologer_id: int
     status: str  # "scheduled" | "processing" | "paid" | "on_hold" | (real) "processed" etc.
+    # | "no_record_this_cycle" (real, linked astrologer with no row in the
+    # latest synced payout tab — tool_registry renders this distinctly,
+    # never as a normal amount/date breakdown).
     amount_inr: int
     scheduled_date: str
     last_paid_date: str
@@ -39,10 +42,7 @@ class PayoutStatus:
     incentive_inr: int | None = None
 
 
-def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> PayoutStatus | None:
-    synced = db.get(SheetPayoutStatus, expert_id)
-    if synced is None:
-        return None
+def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> PayoutStatus:
     # Payouts run every alternate Friday; sheets_sync_service computes the
     # real next date from the payout spreadsheet's own tab names each sync
     # (see PayoutCycleInfo) — only missing if that auto-detection couldn't
@@ -54,6 +54,26 @@ def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> Payo
         if cycle_info
         else "not tracked — could not determine the next cycle"
     )
+    synced = db.get(SheetPayoutStatus, expert_id)
+    if synced is None:
+        # A real, ops-linked astrologer (has expert_id) but missing from
+        # the most recently synced cycle's tab — e.g. no activity that
+        # cycle, or a real gap in ops's own sheet. Confirmed live
+        # 2026-08-19: this used to fall through to the mocked/demo fallback
+        # below, which produced a confident, plausible-looking but 100%
+        # fabricated amount and dates for a real astrologer — the same
+        # class of bug as the salary_client hallucination (see
+        # tool_schemas.py), except in the integration layer itself, so no
+        # prompt instruction could have caught it. Say plainly there's no
+        # record instead of inventing one; the next cycle's date is still
+        # real (it's not per-astrologer) so that part is safe to include.
+        return PayoutStatus(
+            astrologer_id=astrologer_id,
+            status="no_record_this_cycle",
+            amount_inr=0,
+            scheduled_date=scheduled_date,
+            last_paid_date="no record found for this astrologer in the most recently synced cycle",
+        )
     return PayoutStatus(
         astrologer_id=astrologer_id,
         status=synced.status or "unknown",
@@ -71,9 +91,11 @@ def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> Payo
 def get_payout_status(db: Session, astrologer_id: int) -> PayoutStatus:
     astrologer = db.get(Astrologer, astrologer_id)
     if astrologer and astrologer.expert_id:
-        real = _real_payout_status(db, astrologer_id, astrologer.expert_id)
-        if real is not None:
-            return real
+        # A real, ops-linked astrologer always gets a real (possibly
+        # "no record this cycle") answer — never the mocked/demo fallback
+        # below, which is only for astrologers with no expert_id at all
+        # (e.g. local dev/seed data with nothing real to link to).
+        return _real_payout_status(db, astrologer_id, astrologer.expert_id)
 
     if not MOCK_MODE:
         raise NotImplementedError("Real payout integration is not wired up yet.")

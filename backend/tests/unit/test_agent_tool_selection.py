@@ -176,6 +176,33 @@ def test_astrologer_id_supplied_by_the_model_is_ignored_and_overwritten(db_sessi
     assert captured["astrologer_id"] == 42
 
 
+def test_no_record_this_cycle_renders_an_honest_message_not_a_fabricated_breakdown(
+    db_session, monkeypatch
+):
+    # Confirmed live 2026-08-19: a real, ops-linked astrologer missing from
+    # the latest synced payout cycle used to get a confident but fabricated
+    # amount/date breakdown instead of this. The tool result the model sees
+    # must never contain amount_inr/last_paid_date framing for this case.
+    def fake_get_payout_status(db, astrologer_id):
+        return payout_client.PayoutStatus(
+            astrologer_id=astrologer_id,
+            status="no_record_this_cycle",
+            amount_inr=0,
+            scheduled_date="2026-08-28",
+            last_paid_date="no record found for this astrologer in the most recently synced cycle",
+        )
+
+    monkeypatch.setattr(payout_client, "get_payout_status", fake_get_payout_status)
+
+    ctx = make_ctx(db_session)
+    result = executor.execute("get_payout_status", {}, ctx)
+
+    assert "no_payout_record_found_for_most_recent_cycle=true" in result.content_for_model
+    assert "next_payout_cycle: date=2026-08-28" in result.content_for_model
+    assert "amount_inr" not in result.content_for_model
+    assert "most_recently_processed_payout" not in result.content_for_model
+
+
 def test_unknown_tool_returns_error_without_raising(db_session):
     ctx = make_ctx(db_session)
     result = executor.execute("delete_everything", {}, ctx)
