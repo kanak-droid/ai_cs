@@ -126,6 +126,20 @@ def read_tab(
     return values[0], values[1:]
 
 
+def list_tab_titles(spreadsheet_id: str) -> list[str]:
+    """Every tab's title in the spreadsheet, in whatever order the Sheets API
+    returns them — not necessarily chronological, since ops adds each new
+    payout cycle tab by hand. Used to auto-detect the latest payout cycle
+    rather than requiring a manually-updated tab name in settings every
+    time a new one is added (see sheets_sync_service._latest_payout_cycle).
+    """
+    service = _get_service()
+    result = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
+    ).execute()
+    return [sheet["properties"]["title"] for sheet in result.get("sheets", [])]
+
+
 def cell(row: list[str], index: int) -> str | None:
     """Sheets omits trailing empty cells, so a short row is normal, not an error."""
     if index < 0 or index >= len(row):

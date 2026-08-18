@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.config import MOCK_MODE
 from app.models.astrologer import Astrologer
+from app.models.payout_cycle_info import PayoutCycleInfo
 from app.models.sheet_sync import SheetPayoutStatus
 
 
@@ -35,16 +36,22 @@ def _real_payout_status(db: Session, astrologer_id: int, expert_id: int) -> Payo
     synced = db.get(SheetPayoutStatus, expert_id)
     if synced is None:
         return None
+    # Payouts run every alternate Friday; sheets_sync_service computes the
+    # real next date from the payout spreadsheet's own tab names each sync
+    # (see PayoutCycleInfo) — only missing if that auto-detection couldn't
+    # parse any tab yet, in which case there's genuinely nothing real to
+    # report, so say so explicitly rather than let the model guess one.
+    cycle_info = db.get(PayoutCycleInfo, 1)
+    scheduled_date = (
+        cycle_info.next_payout_date.isoformat()
+        if cycle_info
+        else "not tracked — could not determine the next cycle"
+    )
     return PayoutStatus(
         astrologer_id=astrologer_id,
         status=synced.status or "unknown",
         amount_inr=synced.total_after_tax or 0,
-        # The sheet only tracks cycles already processed — there's no real
-        # forward-looking schedule to report. Saying so explicitly, rather
-        # than reusing last_paid_date here, is what stops the model from
-        # inventing a plausible-but-fake next date (verified live: it did,
-        # from a duplicate value that didn't even make sense as a schedule).
-        scheduled_date="not tracked — only past processed cycles are available",
+        scheduled_date=scheduled_date,
         last_paid_date=synced.processed_at or "unknown",
         wallet_balance_inr=synced.wallet_balance,
         kyc_status=synced.kyc_status,

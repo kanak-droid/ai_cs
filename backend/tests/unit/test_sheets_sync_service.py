@@ -1,9 +1,14 @@
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import settings
+from app.integrations import sheets_client
 from app.models.astrologer import Astrologer
 from app.models.expert_priority import ExpertPriority
-from app.models.sheet_sync import SheetAstrologerRoster, SheetQueuePerformance
+from app.models.payout_cycle_info import PayoutCycleInfo
+from app.models.sheet_sync import SheetAstrologerRoster, SheetPayoutStatus, SheetQueuePerformance
 from app.services import sheets_sync_service
 
 
@@ -129,3 +134,85 @@ def test_skips_a_row_that_collides_with_a_concurrent_sync_call_instead_of_aborti
     winner = db_session.query(Astrologer).filter_by(expert_id=506).one()
     assert winner.user_id == 90506
     assert winner.assigned_admin_id == seeded_admin.id
+
+
+def test_parses_a_plain_month_day_cycle_tab_title():
+    parsed = sheets_sync_service._parse_cycle_tab_date("August 14", today=date(2026, 8, 18))
+    assert parsed == date(2026, 8, 14)
+
+
+def test_parses_a_cycle_tab_title_with_a_trailing_cycle_number_suffix():
+    # "July 31 - 1" — the " - 1" is a cycle-number suffix, not part of the date.
+    parsed = sheets_sync_service._parse_cycle_tab_date("July 31 - 1", today=date(2026, 8, 18))
+    assert parsed == date(2026, 7, 31)
+
+
+def test_resolves_the_year_across_a_new_year_boundary():
+    # Today is early January; a "December 31" tab is last year's, not this year's.
+    parsed = sheets_sync_service._parse_cycle_tab_date("December 31", today=date(2026, 1, 3))
+    assert parsed == date(2025, 12, 31)
+
+
+def test_returns_none_for_a_title_with_no_recognizable_date():
+    assert sheets_sync_service._parse_cycle_tab_date("Summary", today=date(2026, 8, 18)) is None
+
+
+def test_next_payout_date_is_fourteen_days_after_the_latest_cycle():
+    next_date = sheets_sync_service._next_payout_date(date(2026, 8, 14), today=date(2026, 8, 18))
+    assert next_date == date(2026, 8, 28)
+
+
+def test_next_payout_date_advances_past_today_when_sync_is_behind():
+    # The latest known cycle is more than one 14-day step in the past —
+    # e.g. ops hasn't added this fortnight's tab yet — so the next payout
+    # date must still land in the future, not repeat a date already passed.
+    next_date = sheets_sync_service._next_payout_date(date(2026, 7, 1), today=date(2026, 8, 18))
+    assert next_date > date(2026, 8, 18)
+
+
+def test_latest_payout_cycle_picks_the_most_recent_tab(monkeypatch):
+    monkeypatch.setattr(
+        sheets_client,
+        "list_tab_titles",
+        lambda spreadsheet_id: ["Summary", "July 31 - 1", "August 14", "June 17"],
+    )
+
+    result = sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18))
+
+    assert result == ("August 14", date(2026, 8, 14))
+
+
+def test_latest_payout_cycle_returns_none_when_listing_tabs_fails(monkeypatch):
+    def _raise(spreadsheet_id):
+        raise RuntimeError("Sheets API unavailable")
+
+    monkeypatch.setattr(sheets_client, "list_tab_titles", _raise)
+
+    assert sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18)) is None
+
+
+def test_sync_payout_status_auto_detects_the_latest_cycle_tab_and_records_it(db_session, monkeypatch):
+    monkeypatch.setattr(
+        sheets_client, "list_tab_titles", lambda spreadsheet_id: ["July 31 - 1", "August 14"]
+    )
+
+    def fake_read_tab(spreadsheet_id, tab_title, header_row):
+        assert tab_title == "August 14"  # the auto-detected latest, not settings.PAYOUT_CYCLE_TAB
+        header = [""] * 20
+        row = [""] * 20
+        row[1] = "601"
+        return header, [row]
+
+    monkeypatch.setattr(sheets_client, "read_tab", fake_read_tab)
+
+    count = sheets_sync_service._sync_payout_status(db_session, today=date(2026, 8, 18))
+
+    assert count == 1
+    row = db_session.query(SheetPayoutStatus).filter_by(expert_id=601).one()
+    assert row.cycle_tab == "August 14"
+
+    info = db_session.get(PayoutCycleInfo, 1)
+    assert info is not None
+    assert info.latest_cycle_tab == "August 14"
+    assert info.latest_cycle_date == date(2026, 8, 14)
+    assert info.next_payout_date == date(2026, 8, 28)

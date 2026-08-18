@@ -4,6 +4,7 @@ from app.models.chat_session import ChatSession
 from app.models.email_log import EmailLog
 from app.models.enums import SessionResolution, TicketStatus
 from app.models.expert_priority import ExpertPriority
+from app.models.payout_cycle_info import PayoutCycleInfo
 from app.models.sheet_sync import (
     SheetAstrologerRoster,
     SheetKycRecord,
@@ -22,6 +23,7 @@ __all__ = [
     "SessionResolution",
     "TicketStatus",
     "ExpertPriority",
+    "PayoutCycleInfo",
     "SheetAstrologerRoster",
     "SheetKycRecord",
     "SheetPayoutStatus",

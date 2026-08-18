@@ -23,16 +23,21 @@ from a saved analytics query instead of a sheet; language/talktime/queue
 stats remain unsynced until ops shares a source for those specifically.
 """
 
+import calendar
 import logging
+import re
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.time import utcnow
 from app.integrations import admin_mapping_client, analytics_client, sheets_client
 from app.models.astrologer import Astrologer
 from app.models.expert_priority import ExpertPriority
+from app.models.payout_cycle_info import PayoutCycleInfo
 from app.models.sheet_sync import (
     SheetAstrologerRoster,
     SheetKycRecord,
@@ -43,6 +48,72 @@ from app.models.sheet_sync import (
 logger = logging.getLogger(__name__)
 
 _PRIORITY_TIER_TO_INT = {"P1": 1, "P2": 2, "P3": 3, "P4": 4, "P5": 5}
+
+_PAYOUT_CYCLE_DAYS = 14  # payouts run every alternate Friday
+
+_MONTH_NAME_TO_NUMBER = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
+# Cycle tabs are named like "July 31" or "August 14 - 1" — a month name, a
+# day number, and sometimes a " - <n>" cycle-number suffix that isn't part
+# of the date at all, so only the leading "Month Day" is matched.
+_CYCLE_TAB_DATE_RE = re.compile(r"^([A-Za-z]+)\s+(\d{1,2})")
+
+
+def _parse_cycle_tab_date(title: str, today: date) -> date | None:
+    """Resolves a cycle tab's title to a real date. Tab titles carry no
+    year, so it's inferred against `today`: these tabs are always for an
+    already-elapsed or just-elapsed cycle, never far in the future, so the
+    correct year is whichever candidate lands closest to today.
+    """
+    match = _CYCLE_TAB_DATE_RE.match(title.strip())
+    if not match:
+        return None
+    month = _MONTH_NAME_TO_NUMBER.get(match.group(1).lower())
+    if month is None:
+        return None
+    day = int(match.group(2))
+    candidates = []
+    for year in (today.year - 1, today.year, today.year + 1):
+        try:
+            candidates.append(date(year, month, day))
+        except ValueError:
+            continue
+    if not candidates:
+        return None
+    return min(candidates, key=lambda d: abs((d - today).days))
+
+
+def _latest_payout_cycle(today: date) -> tuple[str, date] | None:
+    """Finds whichever tab in the payout spreadsheet represents the most
+    recent cycle, so ops never has to hand-update settings.PAYOUT_CYCLE_TAB
+    every time a new one is added (every other Friday). Falls back to that
+    setting (returns None here) if listing/parsing tabs doesn't turn up
+    anything usable — e.g. the sheet's naming convention changes.
+    """
+    try:
+        titles = sheets_client.list_tab_titles(settings.PAYOUT_SPREADSHEET_ID)
+    except Exception:
+        logger.exception("Could not list payout spreadsheet tabs")
+        return None
+    dated = [
+        (title, parsed)
+        for title in titles
+        if (parsed := _parse_cycle_tab_date(title, today)) is not None
+    ]
+    if not dated:
+        return None
+    return max(dated, key=lambda pair: pair[1])
+
+
+def _next_payout_date(latest_cycle_date: date, today: date) -> date:
+    """Payouts run every alternate Friday — the next one is 14 days after
+    the latest processed cycle, advanced by further 14-day steps if that
+    sync lags behind (e.g. a new cycle tab hasn't been added yet even
+    though one is due), so this is always a genuinely upcoming date.
+    """
+    next_date = latest_cycle_date + timedelta(days=_PAYOUT_CYCLE_DAYS)
+    while next_date <= today:
+        next_date += timedelta(days=_PAYOUT_CYCLE_DAYS)
+    return next_date
 
 
 def _to_int(value: str | None) -> int | None:
@@ -137,10 +208,12 @@ def _sync_expert_priority(db: Session) -> int:
     return _upsert_many(db, ExpertPriority, entries)
 
 
-def _sync_payout_status(db: Session) -> int:
-    header, rows = sheets_client.read_tab(
-        settings.PAYOUT_SPREADSHEET_ID, settings.PAYOUT_CYCLE_TAB, header_row=1
-    )
+def _sync_payout_status(db: Session, *, today: date | None = None) -> int:
+    today = today or utcnow().date()
+    latest = _latest_payout_cycle(today)
+    cycle_tab = latest[0] if latest else settings.PAYOUT_CYCLE_TAB
+
+    header, rows = sheets_client.read_tab(settings.PAYOUT_SPREADSHEET_ID, cycle_tab, header_row=1)
     entries = []
     for row in rows:
         expert_id = _to_int(sheets_client.cell(row, 1))
@@ -160,10 +233,20 @@ def _sync_payout_status(db: Session) -> int:
                 "total_after_tax": _to_int(sheets_client.cell(row, 15)),
                 "status": sheets_client.cell(row, 19),
                 "processed_at": sheets_client.cell(row, 20),
-                "cycle_tab": settings.PAYOUT_CYCLE_TAB,
+                "cycle_tab": cycle_tab,
             },
         ))
-    return _upsert_many(db, SheetPayoutStatus, entries)
+    count = _upsert_many(db, SheetPayoutStatus, entries)
+
+    if latest is not None:
+        _, latest_cycle_date = latest
+        info = db.get(PayoutCycleInfo, 1) or PayoutCycleInfo(id=1)
+        info.latest_cycle_tab = cycle_tab
+        info.latest_cycle_date = latest_cycle_date
+        info.next_payout_date = _next_payout_date(latest_cycle_date, today)
+        db.add(info)
+
+    return count
 
 
 def _provision_new_astrologers(db: Session) -> int:
