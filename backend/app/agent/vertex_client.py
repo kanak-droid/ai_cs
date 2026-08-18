@@ -30,7 +30,11 @@ def build_vertex_client() -> genai.Client:
     credentials = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
     return genai.Client(
         vertexai=True,
-        project=settings.GOOGLE_CLOUD_PROJECT,
+        # Read straight off the credential itself (per the org's migration
+        # guide) rather than a separately-configured setting — one less
+        # value to keep in sync, and it can never drift from whichever
+        # project the credentials actually belong to.
+        project=info["project_id"],
         location=settings.GOOGLE_CLOUD_LOCATION,
         credentials=credentials,
     )

@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     # single untagged billing bucket nobody can attribute to a team/use
     # case). GEMINI_VERTEX_CREDENTIALS_JSON is a GCP service account's JSON,
     # same env-var convention (and parsing) as GOOGLE_SHEETS_CREDENTIALS_JSON.
-    GOOGLE_CLOUD_PROJECT: str = ""
+    # No separate project setting — vertex_client reads project_id straight
+    # off the credential itself, per the org's migration guide.
     GOOGLE_CLOUD_LOCATION: str = "global"
     GEMINI_VERTEX_CREDENTIALS_JSON: str = ""
     GEMINI_MODEL: str = "gemini-flash-latest"

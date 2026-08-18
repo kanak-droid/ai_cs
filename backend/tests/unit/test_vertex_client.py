@@ -12,10 +12,13 @@ def test_build_vertex_client_raises_when_credentials_are_missing(monkeypatch):
 
 
 def test_build_vertex_client_wires_project_location_and_credentials(monkeypatch):
+    # project comes from the credential's own project_id field, not a
+    # separately-configured setting — per the org's migration guide.
     monkeypatch.setattr(
-        settings, "GEMINI_VERTEX_CREDENTIALS_JSON", '{"type": "service_account"}'
+        settings,
+        "GEMINI_VERTEX_CREDENTIALS_JSON",
+        '{"type": "service_account", "project_id": "test-project"}',
     )
-    monkeypatch.setattr(settings, "GOOGLE_CLOUD_PROJECT", "test-project")
     monkeypatch.setattr(settings, "GOOGLE_CLOUD_LOCATION", "asia-south1")
 
     fake_credentials = object()
