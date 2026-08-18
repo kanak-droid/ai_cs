@@ -63,6 +63,9 @@ class Settings(BaseSettings):
 
     SLACK_WEBHOOK_URL: str = "https://hooks.slack.com/services/EXAMPLE/WEBHOOK/URL"
     SLACK_SUPPORT_CHANNEL: str = "#support-test"
+    # Linked from every ticket-created Slack notification so a KAM/CS can
+    # jump straight to it instead of hunting for the ticket in the dashboard.
+    ADMIN_DASHBOARD_URL: str = "https://astro-supply-help-admin.astrolokal.com"
     # Slack has its own mock switch, independent of MOCK_MODE — a real Slack
     # webhook can go live on its own without payout/KYC/salary/etc. (which have
     # no real backend yet) needing to come along with it.

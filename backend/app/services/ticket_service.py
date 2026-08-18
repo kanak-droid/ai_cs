@@ -212,7 +212,8 @@ def create_ticket(
         f"*Category:* {category} / {sub_category}\n"
         f"*Team:* {team} team\n"
         f"*Astrologer:* {astrologer_name} (#{astrologer_id}, expert_id: {expert_id_label}) — "
-        f"Priority: {priority_label}"
+        f"Priority: {priority_label}\n"
+        f"<{settings.ADMIN_DASHBOARD_URL}/tickets/{ticket.id}|View in dashboard>"
     )
     cs_line = (
         f"\n*CS:* {_slack_mention(cs_admin, cs_name)} ({'/'.join(cs_admin.languages) or 'no language set'})"
