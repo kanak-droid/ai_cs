@@ -12,6 +12,7 @@ directly to the google.genai `types` module, which is the AI provider's wire
 format, not a business-logic dependency.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from google.genai import types
@@ -22,7 +23,41 @@ from app.agent.context import SessionContext
 from app.agent.prompt import render_system_prompt
 from app.agent.trace import AgentTrace, AgentTraceStep
 
+logger = logging.getLogger(__name__)
+
 MAX_ITERATIONS = 8
+_APOLOGY_REPLY = "Sorry, I couldn't process that — could you try again?"
+# Confirmed live 2026-08-18 on Vertex AI: a candidate with
+# finish_reason=MALFORMED_FUNCTION_CALL (the model tried to call a tool with
+# arguments that failed schema validation) is non-deterministic sampling
+# variance, not a permanent failure — 2 of 3 identical retries for the
+# exact same conversation failed this way, the other succeeded. A small
+# automatic retry resolves most of these transparently instead of making
+# the astrologer manually retry after a dead-end apology.
+_MAX_GENERATE_ATTEMPTS = 3
+
+
+def _is_usable(response: types.GenerateContentResponse) -> bool:
+    if not response.candidates or response.candidates[0].content is None:
+        return False
+    return response.candidates[0].finish_reason in (None, types.FinishReason.STOP)
+
+
+def _generate_with_retry(
+    client: AgentClient, *, system: str, contents: list[types.Content], tools: list[types.Tool]
+) -> types.GenerateContentResponse:
+    response = client.generate(system=system, contents=contents, tools=tools)
+    for attempt in range(1, _MAX_GENERATE_ATTEMPTS):
+        if _is_usable(response):
+            return response
+        logger.warning(
+            "Gemini response unusable (finish_reason=%s) on attempt %d/%d — retrying",
+            response.candidates[0].finish_reason if response.candidates else None,
+            attempt,
+            _MAX_GENERATE_ATTEMPTS,
+        )
+        response = client.generate(system=system, contents=contents, tools=tools)
+    return response
 
 
 @dataclass(frozen=True)
@@ -86,14 +121,23 @@ def run_chat_turn(
     metadata: dict = {}
 
     for _ in range(MAX_ITERATIONS):
-        response = client.generate(system=system, contents=contents, tools=tools)
+        response = _generate_with_retry(client, system=system, contents=contents, tools=tools)
 
-        if not response.candidates or response.candidates[0].content is None:
-            return ChatTurnResult(
-                reply="Sorry, I couldn't process that — could you try again?",
-                trace=trace.to_list(),
-                metadata=metadata,
+        # Still unusable after retrying — a non-STOP finish_reason (e.g.
+        # MALFORMED_FUNCTION_CALL) means this candidate has to be treated
+        # as unusable even though it technically exists (content.parts is
+        # None in that case). Without this check, that would silently read
+        # as "no function call, so use the text" below — parts is empty,
+        # so the "text" is "" — and return a blank reply with an empty
+        # trace, no error at all, instead of surfacing the failure.
+        if not _is_usable(response):
+            logger.warning(
+                "Gemini response still unusable after %d attempts (finish_reason=%s) — "
+                "returning apology instead of a possibly-empty reply",
+                _MAX_GENERATE_ATTEMPTS,
+                response.candidates[0].finish_reason if response.candidates else None,
             )
+            return ChatTurnResult(reply=_APOLOGY_REPLY, trace=trace.to_list(), metadata=metadata)
 
         model_content = response.candidates[0].content
         contents.append(model_content)

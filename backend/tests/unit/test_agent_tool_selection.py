@@ -105,6 +105,52 @@ def test_orchestrator_calls_matching_tool_and_returns_final_reply(db_session):
     assert result.trace[0].ok is True
 
 
+def _malformed_function_call_response() -> types.GenerateContentResponse:
+    # Confirmed live 2026-08-18 on Vertex AI: the model tried to call a
+    # tool with arguments that failed schema validation, and the response
+    # came back as finish_reason=MALFORMED_FUNCTION_CALL with
+    # content.parts=None — no function call, no text, nothing. Without a
+    # finish_reason check, that reads as "no function call, so use the
+    # (empty) text" and silently returns a blank reply with an empty trace,
+    # no error at all.
+    return types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(parts=None, role=None),
+                finish_reason=types.FinishReason.MALFORMED_FUNCTION_CALL,
+            )
+        ]
+    )
+
+
+def test_malformed_function_call_returns_an_apology_after_exhausting_retries(db_session):
+    ctx = make_ctx(db_session)
+    # One per attempt — MAX_GENERATE_ATTEMPTS is 3, all of them malformed.
+    fake_client = FakeAgentClient([_malformed_function_call_response() for _ in range(3)])
+
+    result = run_chat_turn(fake_client, ctx, "Raise the issue to customer support")
+
+    assert result.reply != ""
+    assert result.trace == []
+    assert len(fake_client.calls) == 3
+
+
+def test_malformed_function_call_recovers_transparently_on_retry(db_session):
+    # Confirmed live 2026-08-18: this finish_reason is non-deterministic
+    # sampling variance, not a permanent failure — retrying the identical
+    # request often succeeds. The automatic retry should surface that
+    # successful result, not the first attempt's failure.
+    ctx = make_ctx(db_session)
+    fake_client = FakeAgentClient(
+        [_malformed_function_call_response(), text_response("All sorted now.")]
+    )
+
+    result = run_chat_turn(fake_client, ctx, "Raise the issue to customer support")
+
+    assert result.reply == "All sorted now."
+    assert len(fake_client.calls) == 2
+
+
 def test_astrologer_id_supplied_by_the_model_is_ignored_and_overwritten(db_session, monkeypatch):
     captured = {}
 
