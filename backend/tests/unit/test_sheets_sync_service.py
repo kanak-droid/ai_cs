@@ -153,6 +153,26 @@ def test_resolves_the_year_across_a_new_year_boundary():
     assert parsed == date(2025, 12, 31)
 
 
+def test_parses_a_three_letter_month_abbreviation():
+    # Confirmed live 2026-08-18 against the real payout sheet: most tabs use
+    # 3-letter abbreviations ("Aug 14"), not full names ("August 14") — a
+    # month-name-only lookup silently failed on every single one of these,
+    # including the actual latest tabs at the time, quietly falling back to
+    # the newest FULL-name tab instead ("July 31"), which was weeks stale.
+    parsed = sheets_sync_service._parse_cycle_tab_date("Aug 14 - 1", today=date(2026, 8, 18))
+    assert parsed == date(2026, 8, 14)
+
+
+def test_never_resolves_a_cycle_tab_to_a_date_far_in_the_future():
+    # Confirmed live 2026-08-18: picking whichever year is numerically
+    # closest to today resolved a "Jan 30" tab seen in August to *next*
+    # January (~165 days away) instead of the one that already happened
+    # (~200 days ago) — 165 < 200, even though these tabs are never really
+    # months in the future. Must prefer the past/current candidate instead.
+    parsed = sheets_sync_service._parse_cycle_tab_date("Jan 30 - 2", today=date(2026, 8, 18))
+    assert parsed == date(2026, 1, 30)
+
+
 def test_returns_none_for_a_title_with_no_recognizable_date():
     assert sheets_sync_service._parse_cycle_tab_date("Summary", today=date(2026, 8, 18)) is None
 
@@ -180,6 +200,21 @@ def test_latest_payout_cycle_picks_the_most_recent_tab(monkeypatch):
     result = sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18))
 
     assert result == ("August 14", date(2026, 8, 14))
+
+
+def test_latest_payout_cycle_breaks_a_date_tie_toward_the_higher_cycle_number(monkeypatch):
+    # The real sheet has multiple tabs per date ("Aug 14 - 1", "Aug 14 - 2",
+    # sometimes "- 3") — the highest-numbered one is assumed to be the most
+    # complete/final version of that date's data.
+    monkeypatch.setattr(
+        sheets_client,
+        "list_tab_titles",
+        lambda spreadsheet_id: ["Aug 14 - 1", "Aug 14 - 3", "Aug 14 - 2"],
+    )
+
+    result = sheets_sync_service._latest_payout_cycle(today=date(2026, 8, 18))
+
+    assert result == ("Aug 14 - 3", date(2026, 8, 14))
 
 
 def test_latest_payout_cycle_returns_none_when_listing_tabs_fails(monkeypatch):

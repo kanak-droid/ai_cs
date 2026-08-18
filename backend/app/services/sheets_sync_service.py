@@ -51,18 +51,42 @@ _PRIORITY_TIER_TO_INT = {"P1": 1, "P2": 2, "P3": 3, "P4": 4, "P5": 5}
 
 _PAYOUT_CYCLE_DAYS = 14  # payouts run every alternate Friday
 
-_MONTH_NAME_TO_NUMBER = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
-# Cycle tabs are named like "July 31" or "August 14 - 1" — a month name, a
-# day number, and sometimes a " - <n>" cycle-number suffix that isn't part
-# of the date at all, so only the leading "Month Day" is matched.
+_MONTH_NAME_TO_NUMBER = {
+    # Real tab titles mix full names ("July 31") and 3-letter abbreviations
+    # ("Aug 14") inconsistently — confirmed live 2026-08-18: every single
+    # abbreviated tab (which included the actual latest ones at the time)
+    # silently failed to parse with only calendar.month_name, so this
+    # quietly fell back to the newest FULL-name tab instead ("July 31"),
+    # weeks stale. Both forms are indexed so neither can silently vanish
+    # like that again.
+    **{name.lower(): i for i, name in enumerate(calendar.month_name) if name},
+    **{abbr.lower(): i for i, abbr in enumerate(calendar.month_abbr) if abbr},
+}
+# Cycle tabs are named like "July 31" or "Aug 14 - 1" — a month name, a day
+# number, and sometimes a " - <n>" cycle-number suffix that isn't part of
+# the date at all, so only the leading "Month Day" is matched.
 _CYCLE_TAB_DATE_RE = re.compile(r"^([A-Za-z]+)\s+(\d{1,2})")
+# The real sheet has multiple tabs per date ("Aug 14 - 1", "Aug 14 - 2",
+# occasionally "- 3") — assumed to be sequential batches within the same
+# cycle, so the highest-numbered one is the most complete/final version of
+# that date's data. Matched separately from the date itself since the
+# spacing around the dash is inconsistent ("Jun 19 -1", "Sep 26-3").
+_CYCLE_NUMBER_RE = re.compile(r"-\s*(\d+)")
 
 
 def _parse_cycle_tab_date(title: str, today: date) -> date | None:
     """Resolves a cycle tab's title to a real date. Tab titles carry no
     year, so it's inferred against `today`: these tabs are always for an
-    already-elapsed or just-elapsed cycle, never far in the future, so the
-    correct year is whichever candidate lands closest to today.
+    already-elapsed or just-elapsing cycle, never far in the future.
+
+    Picking whichever candidate year is numerically closest to today (by
+    absolute distance) gets this backwards for tabs from earlier in the
+    calendar year: confirmed live 2026-08-18, a "Jan 30" tab seen when today
+    was in August resolved to the *next* January (~165 days away) instead
+    of the one that already happened (~200 days ago), since 165 < 200 —
+    despite next January being a future date these tabs never actually are.
+    A small forward buffer still tolerates a tab added a day or two ahead
+    of its nominal date.
     """
     match = _CYCLE_TAB_DATE_RE.match(title.strip())
     if not match:
@@ -79,7 +103,14 @@ def _parse_cycle_tab_date(title: str, today: date) -> date | None:
             continue
     if not candidates:
         return None
-    return min(candidates, key=lambda d: abs((d - today).days))
+    not_future = [d for d in candidates if d <= today + timedelta(days=3)]
+    pool = not_future or candidates
+    return min(pool, key=lambda d: abs((d - today).days))
+
+
+def _cycle_number(title: str) -> int:
+    match = _CYCLE_NUMBER_RE.search(title)
+    return int(match.group(1)) if match else 0
 
 
 def _latest_payout_cycle(today: date) -> tuple[str, date] | None:
@@ -101,7 +132,10 @@ def _latest_payout_cycle(today: date) -> tuple[str, date] | None:
     ]
     if not dated:
         return None
-    return max(dated, key=lambda pair: pair[1])
+    # Ties on date (e.g. "Aug 14 - 1" and "Aug 14 - 2") break toward the
+    # higher cycle number — see _CYCLE_NUMBER_RE's comment.
+    title, cycle_date = max(dated, key=lambda pair: (pair[1], _cycle_number(pair[0])))
+    return title, cycle_date
 
 
 def _next_payout_date(latest_cycle_date: date, today: date) -> date:
