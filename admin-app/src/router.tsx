@@ -4,6 +4,8 @@ import { RequireAuth } from "./auth/RequireAuth";
 import { AdminsPage } from "./features/admins/pages/AdminsPage";
 import { AnalyticsPage } from "./features/analytics/pages/AnalyticsPage";
 import { LoginPage } from "./features/auth/pages/LoginPage";
+import { ChatLogsPage } from "./features/chatLogs/pages/ChatLogsPage";
+import { ChatSessionDetailPage } from "./features/chatLogs/pages/ChatSessionDetailPage";
 import { EmailLogPage } from "./features/emailLog/pages/EmailLogPage";
 import { SheetsSyncPage } from "./features/sheetsSync/pages/SheetsSyncPage";
 import { SlackLogPage } from "./features/slackLog/pages/SlackLogPage";
@@ -30,6 +32,26 @@ const router = createBrowserRouter([
       <RequireAuth>
         <AppShell>
           <TicketDetailPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/chat-logs",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <ChatLogsPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/chat-logs/:id",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <ChatSessionDetailPage />
         </AppShell>
       </RequireAuth>
     ),

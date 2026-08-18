@@ -5,6 +5,7 @@ import { Button } from "../components/Button";
 
 const NAV_ITEMS = [
   { to: "/tickets", label: "Tickets" },
+  { to: "/chat-logs", label: "Chatbot" },
   { to: "/analytics", label: "Analytics" },
   { to: "/admins", label: "Admins", requiresAdminAccess: true },
   { to: "/slack-log", label: "Slack Log" },
