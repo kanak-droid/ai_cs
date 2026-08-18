@@ -99,4 +99,11 @@ if CHAT_DIST_DIR.exists():
         candidate = CHAT_DIST_DIR / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(CHAT_DIST_DIR / "index.html")
+        # index.html references each build's content-hashed JS/CSS
+        # filenames — without this, a browser can serve a stale cached copy
+        # on a normal refresh, keeping a WebView on old asset references
+        # (some possibly deleted by the next deploy) until a hard refresh
+        # forces a real re-fetch (observed live 2026-08-18, admin-app's
+        # equivalent). "no-cache" still allows caching, just forces
+        # revalidation with the server every time.
+        return FileResponse(CHAT_DIST_DIR / "index.html", headers={"Cache-Control": "no-cache"})
