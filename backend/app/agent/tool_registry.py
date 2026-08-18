@@ -43,24 +43,35 @@ class ToolSpec:
 
 def _handle_get_payout_status(tool_input: dict, ctx: SessionContext) -> ToolResult:
     result = payout_client.get_payout_status(ctx.db, ctx.astrologer_id)
+    # amount_inr and scheduled_date are NOT the same cycle — confirmed live
+    # 2026-08-18: the model was told amount_inr=767, scheduled_date=<future
+    # date>, and reasonably but wrongly concluded "767 will be paid on that
+    # future date." amount_inr is what was already paid out for the most
+    # recently PROCESSED cycle; scheduled_date is a separate, later cycle
+    # that hasn't happened yet and has no known amount at all. Every label
+    # below spells this out explicitly so the two can't be conflated again.
     content = (
-        f"status={result.status} amount_inr={result.amount_inr} "
-        f"scheduled_date={result.scheduled_date} last_paid_date={result.last_paid_date}"
+        f"most_recently_processed_payout: amount_inr={result.amount_inr} "
+        f"status={result.status} processed_on={result.last_paid_date} "
+        f"(already paid on this date — never describe this amount as upcoming/scheduled) | "
+        f"next_payout_cycle: date={result.scheduled_date} "
+        f"(a separate, later cycle that hasn't happened yet — its amount is not known/processed "
+        f"yet, never state an amount for it)"
     )
     if result.wallet_balance_inr is not None:
-        content += f" wallet_balance_inr={result.wallet_balance_inr}"
+        content += f" | wallet_balance_inr={result.wallet_balance_inr}"
     if result.incentive_inr is not None:
-        content += f" incentive_inr={result.incentive_inr}"
+        content += f" | incentive_inr={result.incentive_inr} (part of the already-processed payout above)"
     # TDS is the most common reason a payout looks lower than expected —
     # incomplete KYC means a much higher rate. Only present when this
     # astrologer has a real linked payout row (see payout_client.py).
     if result.tds_deducted_percent is not None:
         # Only present for a real linked payout row — also the signal that
-        # scheduled_date above came from the real, sheet-derived cadence
-        # below, not the unrelated mocked fallback pattern (which has
-        # nothing to do with alternate Fridays at all).
+        # next_payout_cycle's date above came from the real, sheet-derived
+        # cadence below, not the unrelated mocked fallback pattern (which
+        # has nothing to do with alternate Fridays at all).
         content += (
-            f" this_cycle_kyc_status={result.kyc_status} "
+            f" | this_cycle_kyc_status={result.kyc_status} "
             f"tds_deducted_percent={result.tds_deducted_percent} "
             f"tds_amount_inr={result.tds_amount_inr} "
             f"payout_cadence=\"runs every alternate Friday\""
