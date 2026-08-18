@@ -27,14 +27,15 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
 _APOLOGY_REPLY = "Sorry, I couldn't process that — could you try again?"
-# Confirmed live 2026-08-18 on Vertex AI: a candidate with
-# finish_reason=MALFORMED_FUNCTION_CALL (the model tried to call a tool with
-# arguments that failed schema validation) is non-deterministic sampling
-# variance, not a permanent failure — 2 of 3 identical retries for the
-# exact same conversation failed this way, the other succeeded. A small
-# automatic retry resolves most of these transparently instead of making
-# the astrologer manually retry after a dead-end apology.
-_MAX_GENERATE_ATTEMPTS = 3
+# Confirmed live 2026-08-18 on Vertex AI: a candidate with a non-STOP
+# finish_reason (MALFORMED_FUNCTION_CALL — a tool call with arguments that
+# failed schema validation — and also observed UNEXPECTED_TOOL_CALL) is
+# non-deterministic sampling variance, not a permanent failure. A broad
+# smoke test across many real conversations found this landed on ~16% of
+# turns even after 3 attempts each, so retrying resolves most but not all
+# of these — 5 attempts is still cheap on this model and meaningfully
+# lowers the residual apology rate.
+_MAX_GENERATE_ATTEMPTS = 5
 
 
 def _is_usable(response: types.GenerateContentResponse) -> bool:

@@ -1,6 +1,6 @@
 from google.genai import types
 
-from app.agent import executor, tool_schemas
+from app.agent import executor, orchestrator, tool_schemas
 from app.agent.context import SessionContext
 from app.agent.orchestrator import MAX_ITERATIONS, HistoryTurn, run_chat_turn
 from app.agent.tool_registry import REGISTRY
@@ -125,14 +125,17 @@ def _malformed_function_call_response() -> types.GenerateContentResponse:
 
 def test_malformed_function_call_returns_an_apology_after_exhausting_retries(db_session):
     ctx = make_ctx(db_session)
-    # One per attempt — MAX_GENERATE_ATTEMPTS is 3, all of them malformed.
-    fake_client = FakeAgentClient([_malformed_function_call_response() for _ in range(3)])
+    # One per attempt, all of them malformed — referencing the real
+    # constant rather than a hardcoded number so this can't silently drift
+    # out of sync with it again.
+    attempts = orchestrator._MAX_GENERATE_ATTEMPTS
+    fake_client = FakeAgentClient([_malformed_function_call_response() for _ in range(attempts)])
 
     result = run_chat_turn(fake_client, ctx, "Raise the issue to customer support")
 
     assert result.reply != ""
     assert result.trace == []
-    assert len(fake_client.calls) == 3
+    assert len(fake_client.calls) == attempts
 
 
 def test_malformed_function_call_recovers_transparently_on_retry(db_session):
