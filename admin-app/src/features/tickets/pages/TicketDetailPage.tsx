@@ -52,7 +52,7 @@ export function TicketDetailPage() {
             descriptionEn={ticket.description_en}
             language={ticket.preferred_language}
           />
-          <AttachmentPreview url={ticket.attachment_url} />
+          <AttachmentPreview ticketId={ticket.id} url={ticket.attachment_url} />
           <TicketHistoryList history={ticket.history} />
         </div>
         <div className="flex flex-col gap-4">

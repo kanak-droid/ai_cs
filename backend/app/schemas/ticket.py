@@ -44,3 +44,10 @@ class TicketStatusUpdateRequest(BaseModel):
 
 class TicketSatisfactionRequest(BaseModel):
     satisfied: bool
+
+
+class AttachmentPreviewResponse(BaseModel):
+    # A short-lived, signed URL — safe to load directly in an <img>/<a
+    # href download>, unlike the ticket's raw attachment_url (see
+    # object_storage.generate_preview_url).
+    preview_url: str

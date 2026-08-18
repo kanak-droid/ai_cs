@@ -1,7 +1,7 @@
 import httpx
 
 from app.core.config import settings
-from app.integrations import slack_client
+from app.integrations import object_storage, slack_client
 from app.models.slack_log import SlackLog
 
 
@@ -42,9 +42,13 @@ def test_real_upload_success_writes_a_non_mock_log(db_session, monkeypatch):
 
     calls = []
 
-    def fake_get(url, **kwargs):
-        calls.append(("get", url))
-        return _FakeResponse(content=b"fake-bytes")
+    # Fetches the actual bytes via object_storage (our own AWS credentials
+    # for S3, see its docstring) rather than a plain httpx.get against the
+    # attachment's URL — a raw unauthenticated GET 403s on S3 unless the
+    # bucket has a public-read policy attached (confirmed live 2026-08-18).
+    monkeypatch.setattr(
+        object_storage, "download_file", lambda url: (b"fake-bytes", "image/jpeg")
+    )
 
     def fake_post(url, **kwargs):
         calls.append(("post", url))
@@ -56,7 +60,6 @@ def test_real_upload_success_writes_a_non_mock_log(db_session, monkeypatch):
             return _FakeResponse({"ok": True})
         raise AssertionError(f"unexpected POST to {url}")
 
-    monkeypatch.setattr(httpx, "get", fake_get)
     monkeypatch.setattr(httpx, "post", fake_post)
 
     slack_client.upload_attachment(db_session, attachment_url="http://x/photo.jpg", ticket_id=None)
@@ -64,21 +67,21 @@ def test_real_upload_success_writes_a_non_mock_log(db_session, monkeypatch):
     entry = db_session.query(SlackLog).filter_by(ticket_id=None).one()
     assert entry.mock is False
     assert entry.channel == "C123"
-    # All 4 real steps happened, in order.
-    assert [c[0] for c in calls] == ["get", "post", "post", "post"]
+    # All 3 real Slack API steps happened, in order.
+    assert [c[0] for c in calls] == ["post", "post", "post"]
 
 
 def test_real_upload_failure_is_swallowed_not_raised(db_session, monkeypatch):
-    # Best-effort: a network/API failure must never bubble up into
+    # Best-effort: a failure to fetch the file must never bubble up into
     # create_ticket() and break ticket creation for the astrologer.
     monkeypatch.setattr(settings, "SLACK_MOCK_MODE", False)
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(settings, "SLACK_UPLOAD_CHANNEL_ID", "C123")
 
-    def failing_get(url, **kwargs):
-        raise httpx.ConnectError("boom")
+    def failing_download(url):
+        raise RuntimeError("boom")
 
-    monkeypatch.setattr(httpx, "get", failing_get)
+    monkeypatch.setattr(object_storage, "download_file", failing_download)
 
     slack_client.upload_attachment(db_session, attachment_url="http://x/photo.jpg", ticket_id=None)
 
@@ -91,7 +94,7 @@ def test_slack_api_error_response_is_also_swallowed(db_session, monkeypatch):
     monkeypatch.setattr(settings, "SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setattr(settings, "SLACK_UPLOAD_CHANNEL_ID", "C123")
 
-    monkeypatch.setattr(httpx, "get", lambda url, **kwargs: _FakeResponse(content=b"bytes"))
+    monkeypatch.setattr(object_storage, "download_file", lambda url: (b"bytes", "image/jpeg"))
     monkeypatch.setattr(
         httpx, "post", lambda url, **kwargs: _FakeResponse({"ok": False, "error": "not_in_channel"})
     )

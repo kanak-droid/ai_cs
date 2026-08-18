@@ -18,6 +18,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.integrations import object_storage
 from app.models.slack_log import SlackLog
 
 logger = logging.getLogger(__name__)
@@ -81,9 +82,11 @@ def upload_attachment(db: Session, *, attachment_url: str, ticket_id: int) -> No
 
 
 def _real_upload_attachment(db: Session, *, attachment_url: str, ticket_id: int) -> None:
-    image = httpx.get(attachment_url, timeout=15.0)
-    image.raise_for_status()
-    content = image.content
+    # A plain unauthenticated GET against attachment_url 403s on S3 unless
+    # the bucket has a public-read policy attached — object_storage reads
+    # it with our own AWS credentials instead, which works regardless (see
+    # its download_file docstring). Confirmed live 2026-08-18.
+    content, _content_type = object_storage.download_file(attachment_url)
     filename = attachment_url.rsplit("/", 1)[-1] or f"ticket-{ticket_id}-attachment"
 
     headers = {"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"}
