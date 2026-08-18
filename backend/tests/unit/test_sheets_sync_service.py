@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
-from app.integrations import sheets_client
+from app.integrations import analytics_client, sheets_client
 from app.models.astrologer import Astrologer
 from app.models.expert_priority import ExpertPriority
 from app.models.payout_cycle_info import PayoutCycleInfo
@@ -134,6 +134,68 @@ def test_skips_a_row_that_collides_with_a_concurrent_sync_call_instead_of_aborti
     winner = db_session.query(Astrologer).filter_by(expert_id=506).one()
     assert winner.user_id == 90506
     assert winner.assigned_admin_id == seeded_admin.id
+
+
+def test_sync_expert_priority_parses_the_astrologer_language_column(db_session, monkeypatch):
+    # astrologer_language added to the analytics query 2026-08-19, replacing
+    # the old (frozen since 2026-08-14) Supply Tracker sheet as the language
+    # source — this feeds ticket routing, so it must actually reach the DB.
+    monkeypatch.setattr(
+        analytics_client,
+        "fetch_csv",
+        lambda url: [
+            {"expert_id": "701", "user_id": "90701", "expert_name": "Astro Lang",
+             "astrologer_language": "Tamil", "current_priority": "P2"},
+            {"expert_id": "702", "user_id": "90702", "expert_name": "Astro Blank",
+             "astrologer_language": "", "current_priority": "P3"},
+        ],
+    )
+
+    sheets_sync_service._sync_expert_priority(db_session)
+
+    with_lang = db_session.query(ExpertPriority).filter_by(expert_id=701).one()
+    assert with_lang.language == "Tamil"
+    blank_lang = db_session.query(ExpertPriority).filter_by(expert_id=702).one()
+    assert blank_lang.language is None
+
+
+def test_provisioning_prefers_the_fresh_priority_query_language_over_the_stale_sheet(
+    db_session, seeded_admin
+):
+    db_session.add(ExpertPriority(expert_id=507, user_id=90507, expert_name="Fresh Lang", language="Tamil"))
+    db_session.add(SheetQueuePerformance(expert_id=507, languages="Hindi,Telugu"))
+    db_session.commit()
+
+    sheets_sync_service._provision_new_astrologers(db_session)
+
+    astrologer = db_session.query(Astrologer).filter_by(expert_id=507).one()
+    assert astrologer.language == "Tamil"
+
+
+def test_provisioning_falls_back_to_the_stale_sheet_when_the_query_has_no_language_yet(
+    db_session, seeded_admin
+):
+    db_session.add(ExpertPriority(expert_id=508, user_id=90508, expert_name="No Fresh Lang", language=None))
+    db_session.add(SheetQueuePerformance(expert_id=508, languages="Hindi,Telugu"))
+    db_session.commit()
+
+    sheets_sync_service._provision_new_astrologers(db_session)
+
+    astrologer = db_session.query(Astrologer).filter_by(expert_id=508).one()
+    assert astrologer.language == "Hindi,Telugu"
+
+
+def test_sync_astrologer_profiles_updates_language_from_the_fresh_priority_query(db_session):
+    db_session.add(Astrologer(name="Existing", phone="+91-1", language="English", expert_id=509, user_id=90509))
+    db_session.add(ExpertPriority(expert_id=509, user_id=90509, expert_name="Existing", language="Malayalam"))
+    db_session.add(SheetQueuePerformance(expert_id=509, languages="Hindi,Telugu"))
+    db_session.commit()
+
+    count = sheets_sync_service._sync_astrologer_profiles(db_session)
+
+    assert count == 1
+    astrologer = db_session.query(Astrologer).filter_by(expert_id=509).one()
+    assert astrologer.language == "Malayalam"
 
 
 def test_parses_a_plain_month_day_cycle_tab_title():

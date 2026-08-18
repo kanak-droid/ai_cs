@@ -19,8 +19,12 @@ replacement in either new sheet, so that sync step — and the old,
 now-fully-redundant separate wallet-balance sync, since the payout sheet's
 own cycle tab already has a wallet-balance column — was removed.
 `_sync_expert_priority` (added same day) fills the priority half of that gap
-from a saved analytics query instead of a sheet; language/talktime/queue
-stats remain unsynced until ops shares a source for those specifically.
+from a saved analytics query instead of a sheet; talktime/queue stats remain
+unsynced until ops shares a source for those specifically. Language got its
+own replacement 2026-08-19 — an `astrologer_language` column added to that
+same analytics query — since it directly feeds ticket routing
+(admin_mapping_client/cs_assignment_client's language-matched round-robin)
+and a stale value there silently misroutes tickets, not just cosmetic.
 """
 
 import calendar
@@ -250,6 +254,7 @@ def _sync_expert_priority(db: Session) -> int:
             {
                 "user_id": _to_int(row.get("user_id")),
                 "expert_name": row.get("expert_name"),
+                "language": (row.get("astrologer_language") or "").strip() or None,
                 "current_priority_tier": tier,
                 "priority": _PRIORITY_TIER_TO_INT.get(tier) if tier else None,
             },
@@ -363,10 +368,13 @@ def _provision_new_astrologers(db: Session) -> int:
         astrologer = Astrologer(
             name=name,
             phone=(roster.phone_number if roster else None) or "",
+            # Prefer the priority query's own language column (fresh, synced
+            # every run) over queue_performance's, which has been frozen
+            # since the old Supply Tracker sheet stopped syncing 2026-08-14.
             language=(
-                queue_performance.languages
-                if queue_performance and queue_performance.languages
-                else "English"
+                priority_row.language
+                or (queue_performance.languages if queue_performance else None)
+                or "English"
             ),
             expert_id=priority_row.expert_id,
             user_id=priority_row.user_id,
@@ -398,9 +406,12 @@ def _sync_astrologer_profiles(db: Session) -> int:
     """Linking an Astrologer to a real expert_id (§8a) only wired up identity
     (name, id) — their phone/language kept whatever scripts/seed.py originally
     put there. This overwrites phone from the just-synced roster; language
-    still comes from SheetQueuePerformance, which (2026-08-14) has no active
-    sync step, so it only reflects whatever was synced before the old
-    Supply Tracker sheet was retired — stale but real, not fabricated.
+    now comes from the priority query's own `astrologer_language` column
+    (added 2026-08-19), replacing SheetQueuePerformance — which had been
+    frozen since 2026-08-14 when the old Supply Tracker sheet it synced from
+    was retired. Falls back to that frozen value only for experts the new
+    column hasn't covered yet, so a currently-blank language doesn't
+    regress to "English" the moment this ships.
 
     Also backfills user_id from the priority sync (added to that query
     2026-08-14) — this is the real platform identity a real astrologer JWT
@@ -423,12 +434,11 @@ def _sync_astrologer_profiles(db: Session) -> int:
         if roster and roster.phone_number and astrologer.phone != roster.phone_number:
             astrologer.phone = roster.phone_number
             changed = True
-        if (
-            queue_performance
-            and queue_performance.languages
-            and astrologer.language != queue_performance.languages
-        ):
-            astrologer.language = queue_performance.languages
+        fresh_language = (priority_row.language if priority_row else None) or (
+            queue_performance.languages if queue_performance else None
+        )
+        if fresh_language and astrologer.language != fresh_language:
+            astrologer.language = fresh_language
             changed = True
         if (
             priority_row

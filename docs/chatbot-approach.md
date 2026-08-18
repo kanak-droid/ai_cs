@@ -1185,3 +1185,25 @@ calendar year (e.g. a "Jan 30" tab seen in August resolved to next
 January, since ~165 days away is numerically closer than the ~200-day-old
 January that already happened) — despite these tabs never actually being
 for a future cycle. Both fixed in `sheets_sync_service.py`.
+
+## 16. Astrologer language: replaced the frozen Supply Tracker sync with a live source (2026-08-19)
+
+`Astrologer.language` feeds real behavior, not just display — it's what
+`admin_mapping_client.pick_kam` and `cs_assignment_client.get_assigned_cs`
+round-robin against to route a new ticket to a KAM/CS who actually speaks
+the astrologer's language (§7c). Since the old Supply Tracker sheet was
+retired 2026-08-14 (§14), that value had been frozen — never wrong on
+purpose, but never updated either, so any astrologer whose language
+changed (or who was provisioned after the freeze) could be silently
+misrouted.
+
+Fix: added an `astrologer_language` column to the same analytics query
+`_sync_expert_priority` already reads (`PRIORITY_QUERY_CSV_URL`), stored on
+`ExpertPriority.language`. Both places that set `Astrologer.language` —
+`_provision_new_astrologers` (new astrologers) and `_sync_astrologer_profiles`
+(existing ones) — now prefer this fresh value, falling back to the old
+frozen `SheetQueuePerformance.languages` only where the query hasn't
+covered an expert yet, so existing values don't regress to blank/"English"
+the moment this ships. No changes needed to the KAM/CS assignment logic
+itself — it already round-robins on `Astrologer.language`; it was only
+ever the input that was stale.

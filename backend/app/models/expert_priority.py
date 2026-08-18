@@ -26,6 +26,12 @@ class ExpertPriority(Base):
     # Astrologer.user_id in _sync_astrologer_profiles.
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expert_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Added to the query 2026-08-19 as the replacement for the old Supply
+    # Tracker sheet's language column, which stopped syncing 2026-08-14 —
+    # see sheets_sync_service._sync_astrologer_profiles /
+    # _provision_new_astrologers, which now prefer this fresh value over
+    # that stale one. Same "Hindi" / "Hindi, Telugu" format.
+    language: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Raw tier from the query: "P1".."P5", "PRE_MATURE", or blank — kept
     # verbatim for transparency/debugging even though the rest of the app
     # only ever consumes `priority` below.
