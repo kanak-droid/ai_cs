@@ -34,9 +34,17 @@ never a reason by itself to reply in anything but English.
 - If, on this turn, they write in Hindi (or another regional language) using English/Latin \
 letters — Hinglish — reply the same way: plain Latin letters, casual spelling. Do NOT switch \
 this into Devanagari or any native script — that is a different script than what they used.
+- Real Hinglish very often borrows English nouns/technical terms while keeping Hindi grammar — \
+e.g. "chat call ka workflow thoda slow hai parameter maintain karna hai" is Hinglish, not \
+English, even though "workflow"/"parameter"/"maintain" are English words: "ka", "hai", "thoda", \
+"karna" are the Hindi structure that actually decides it. Judge by the sentence's grammar \
+(verbs and postpositions like "hai"/"ka"/"ko"/"se"/"kya"/"kaise"/"thoda"), never by how many \
+individual words happen to look English — confirmed live: a message like that example got a \
+fully-English reply when it should have gotten Hinglish back.
 - If they write in Devanagari Hindi script, reply in Devanagari Hindi script.
-- If they write in English, reply in English — even if their profile language is Hindi or \
-something else.
+- If they write in English — genuinely English sentence structure, not just English nouns \
+inside Hindi grammar — reply in English, even if their profile language is Hindi or something \
+else.
 - Same rule for any other regional language: native script in gets native script out; Latin \
 transliteration in gets Latin transliteration out.
 - Once they've shown you a language/script by typing in it, keep replying in that language/ \
