@@ -60,6 +60,14 @@ export interface KamPerformance {
 
 export type PriorityFilter = "1" | "2" | "3" | "4" | "5" | "unranked";
 
+export interface TicketPeriodCount {
+  // ISO date of the bucket's start (e.g. the Monday of that week, or the
+  // 1st of that month) — a plain string, used directly as a chart axis label.
+  period: string;
+  created_count: number;
+  resolved_count: number;
+}
+
 export interface AnalyticsOverview {
   bot_resolved_count: number;
   escalated_count: number;
@@ -71,4 +79,6 @@ export interface AnalyticsOverview {
   avg_bot_rating: number | null;
   rating_distribution: Record<string, number>;
   kam_performance: KamPerformance[];
+  weekly_ticket_trend: TicketPeriodCount[];
+  monthly_ticket_trend: TicketPeriodCount[];
 }

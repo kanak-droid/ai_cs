@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 from app.integrations import queue_performance_client
 from app.integrations.queue_performance_client import QueuePerformance
 from app.models.enums import TicketStatus
@@ -139,3 +141,90 @@ def test_priority_filter_only_counts_matching_astrologers(db_session, seeded_adm
     p3_categories = {c["category"] for c in p3_overview["top_categories"]}
     assert "kyc" in p3_categories
     assert "payout" not in p3_categories
+
+
+def test_date_range_excludes_sessions_and_tickets_outside_it(db_session, seeded_astrologer):
+    old_session = chat_session_service.get_or_create_session(db_session, "old-session", seeded_astrologer.id)
+    chat_session_service.mark_resolved_by_bot(
+        db_session, "old-session", category="payout", sub_category="payout_delay"
+    )
+    old_session.started_at = datetime(2026, 1, 5)
+
+    new_session = chat_session_service.get_or_create_session(db_session, "new-session", seeded_astrologer.id)
+    chat_session_service.mark_resolved_by_bot(
+        db_session, "new-session", category="kyc", sub_category="kyc_rejected"
+    )
+    new_session.started_at = datetime(2026, 8, 10)
+    db_session.commit()
+
+    overview = analytics_service.get_overview(
+        db_session, date_from=date(2026, 8, 1), date_to=date(2026, 8, 31)
+    )
+    categories = {c["category"] for c in overview["top_categories"]}
+    assert "kyc" in categories
+    assert "payout" not in categories
+
+
+def test_kam_performance_respects_date_range(db_session, seeded_astrologer, seeded_admin):
+    old_ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="old one",
+        description_en="old one",
+        preferred_language="English",
+    )
+    old_ticket.created_at = datetime(2026, 1, 5)
+    db_session.commit()
+
+    overview = analytics_service.get_overview(
+        db_session, date_from=date(2026, 8, 1), date_to=date(2026, 8, 31)
+    )
+    row = next(r for r in overview["kam_performance"] if r["admin_id"] == seeded_admin.id)
+    assert row["assigned_count"] == 0
+
+
+def test_weekly_and_monthly_ticket_trend_bucket_by_created_date(db_session, seeded_astrologer):
+    same_week_a = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="a",
+        description_en="a",
+        preferred_language="English",
+    )
+    same_week_a.created_at = datetime(2026, 8, 10)  # Monday
+    same_week_b = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="b",
+        description_en="b",
+        preferred_language="English",
+    )
+    same_week_b.created_at = datetime(2026, 8, 12)  # same week
+    next_month = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="c",
+        description_en="c",
+        preferred_language="English",
+    )
+    next_month.created_at = datetime(2026, 9, 3)
+    db_session.commit()
+
+    overview = analytics_service.get_overview(
+        db_session, date_from=date(2026, 8, 1), date_to=date(2026, 9, 30)
+    )
+
+    weekly = {row["period"]: row["created_count"] for row in overview["weekly_ticket_trend"]}
+    assert weekly.get("2026-08-10") == 2
+
+    monthly = {row["period"]: row["created_count"] for row in overview["monthly_ticket_trend"]}
+    assert monthly.get("2026-08-01") == 2
+    assert monthly.get("2026-09-01") == 1

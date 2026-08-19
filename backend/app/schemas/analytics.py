@@ -18,6 +18,15 @@ class KamPerformance(BaseModel):
     avg_tat_hours: float | None = None
 
 
+class TicketPeriodCount(BaseModel):
+    # ISO date of the bucket's start (e.g. the Monday of that week, or the
+    # 1st of that month) — a plain string rather than a richer period type
+    # since the frontend only ever uses it as a chart axis label.
+    period: str
+    created_count: int
+    resolved_count: int
+
+
 class AnalyticsOverview(BaseModel):
     bot_resolved_count: int
     escalated_count: int
@@ -29,3 +38,5 @@ class AnalyticsOverview(BaseModel):
     avg_bot_rating: float | None = None
     rating_distribution: dict[str, int]
     kam_performance: list[KamPerformance]
+    weekly_ticket_trend: list[TicketPeriodCount]
+    monthly_ticket_trend: list[TicketPeriodCount]

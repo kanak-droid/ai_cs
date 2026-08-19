@@ -26,6 +26,8 @@ export function TicketQueuePage() {
     // Always highest-priority-first (P1 at top) — there's no sort control
     // for this anymore; priority is what actually determines urgency here.
     sort: "priority" as const,
+    dateFrom: searchParams.get("from") ?? undefined,
+    dateTo: searchParams.get("to") ?? undefined,
   };
 
   const { data: tickets, status } = useTicketQueue(filters);

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,6 +20,8 @@ def list_tickets(
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
     assigned_admin_id: int | None = Query(default=None),
     sort: Literal["asc", "desc", "priority"] = Query(default="desc"),
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
     admin: AdminContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> list[AdminTicketRead]:
@@ -27,6 +30,8 @@ def list_tickets(
         status=status_filter,
         assigned_admin_id=assigned_admin_id,
         sort=sort,
+        date_from=date_from,
+        date_to=date_to,
     )
     ticket_service.attach_astrologer_priority(db, tickets)
     return [AdminTicketRead.model_validate(t) for t in tickets]

@@ -8,6 +8,8 @@ function toSearchParams(filters: TicketQueueFilters): string {
   if (filters.status) params.set("status", filters.status);
   if (filters.assignedAdminId) params.set("assigned_admin_id", String(filters.assignedAdminId));
   params.set("sort", filters.sort);
+  if (filters.dateFrom) params.set("from", filters.dateFrom);
+  if (filters.dateTo) params.set("to", filters.dateTo);
   return params.toString();
 }
 

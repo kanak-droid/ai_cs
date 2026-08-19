@@ -2,6 +2,7 @@ import { ADMIN_SETTABLE_STATUSES, STATUS_LABELS, type TicketStatus } from "@astr
 import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../../auth/AuthContext";
+import { DateRangeFilter } from "../../../components/DateRangeFilter";
 import { useAdminsLookup } from "../api/useAdminsLookup";
 
 const ALL_STATUSES: TicketStatus[] = ["submitted", "assigned_to_kam", ...ADMIN_SETTABLE_STATUSES];
@@ -48,6 +49,8 @@ export function TicketFilters() {
           </option>
         ))}
       </select>
+
+      <DateRangeFilter />
     </div>
   );
 }

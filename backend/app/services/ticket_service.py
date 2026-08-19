@@ -6,7 +6,7 @@ so the two can never diverge — there is deliberately no other way to change a
 ticket's status (no DB trigger, no ORM event hook; see the build plan for why).
 """
 
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -345,6 +345,8 @@ def list_all_tickets(
     status: TicketStatus | None = None,
     assigned_admin_id: int | None = None,
     sort: str = "desc",
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> list[Ticket]:
     """`assigned_admin_id` means "assigned to this admin" generically — it
     matches either the KAM (assigned_admin_id) or the language-matched CS
@@ -364,6 +366,10 @@ def list_all_tickets(
     ties broken by newest first. Priority isn't a DB column (an astrologer's
     priority can change independently of any ticket), so this is a Python
     sort after fetching rather than a SQL ORDER BY.
+
+    `date_from`/`date_to` filter on Ticket.created_at (when it was raised,
+    not when it was resolved) — both inclusive, either can be given alone
+    for an open-ended range, and equal values mean "just this one day".
     """
     stmt = select(Ticket)
     if status is not None:
@@ -375,6 +381,12 @@ def list_all_tickets(
                 and_(Ticket.assigned_cs_id == assigned_admin_id, Ticket.cs_notified.is_(True)),
             )
         )
+    if date_from is not None:
+        stmt = stmt.where(Ticket.created_at >= datetime.combine(date_from, time.min))
+    if date_to is not None:
+        # Exclusive upper bound at the START of the next day, so the whole
+        # end date is included regardless of the time-of-day component.
+        stmt = stmt.where(Ticket.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
 
     if sort == "priority":
         stmt = stmt.order_by(Ticket.created_at.desc())

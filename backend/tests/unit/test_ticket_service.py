@@ -432,6 +432,44 @@ def test_list_all_tickets_filters_by_status_and_admin(db_session, seeded_astrolo
     assert t1.id in [t.id for t in results]
 
 
+def test_list_all_tickets_filters_by_date_range(db_session, seeded_astrologer):
+    from datetime import date, datetime
+
+    old = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="old one",
+        description_en="old one",
+        preferred_language="English",
+    )
+    old.created_at = datetime(2026, 1, 5)
+    in_range = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="in range",
+        description_en="in range",
+        preferred_language="English",
+    )
+    in_range.created_at = datetime(2026, 8, 10)
+    db_session.commit()
+
+    results = ticket_service.list_all_tickets(
+        db_session, date_from=date(2026, 8, 1), date_to=date(2026, 8, 31)
+    )
+
+    assert [t.id for t in results] == [in_range.id]
+
+    # A single day range (from == to) must still include that whole day.
+    same_day = ticket_service.list_all_tickets(
+        db_session, date_from=date(2026, 8, 10), date_to=date(2026, 8, 10)
+    )
+    assert in_range.id in [t.id for t in same_day]
+
+
 def test_cs_admins_are_never_round_robin_assigned(db_session, seeded_admin):
     # seeded_admin is a KAM by default; add a CS admin alongside it and make
     # sure round-robin assignment never lands on the CS one.

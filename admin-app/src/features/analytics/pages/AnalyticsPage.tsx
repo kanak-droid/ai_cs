@@ -1,11 +1,13 @@
 import type { PriorityFilter } from "@astrohelp/shared";
 import { useSearchParams } from "react-router-dom";
 
+import { DateRangeFilter } from "../../../components/DateRangeFilter";
 import { EmptyState } from "../../../components/EmptyState";
 import { Spinner } from "../../../components/Spinner";
 import { useAnalytics } from "../api/useAnalytics";
 import { KamPerformanceTable } from "../components/KamPerformanceTable";
 import { StatCard } from "../components/StatCard";
+import { TicketTrendChart } from "../components/TicketTrendChart";
 import { TopCategoriesList } from "../components/TopCategoriesList";
 
 const PRIORITY_OPTIONS: { value: PriorityFilter | ""; label: string }[] = [
@@ -33,7 +35,9 @@ function formatHours(hours: number | null): string {
 export function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const priority = (searchParams.get("priority") as PriorityFilter | null) ?? undefined;
-  const { data: overview, status } = useAnalytics(priority);
+  const dateFrom = searchParams.get("from") ?? undefined;
+  const dateTo = searchParams.get("to") ?? undefined;
+  const { data: overview, status } = useAnalytics(priority, dateFrom, dateTo);
 
   if (status === "pending") return <Spinner label="Loading analytics…" />;
   if (status === "error" || !overview) return <EmptyState title="Couldn't load analytics" />;
@@ -53,25 +57,28 @@ export function AnalyticsPage() {
             How AstroHelp is doing across every conversation, not just tickets.
           </p>
         </div>
-        <select
-          value={priority ?? ""}
-          onChange={(e) => {
-            const next = new URLSearchParams(searchParams);
-            if (e.target.value) {
-              next.set("priority", e.target.value);
-            } else {
-              next.delete("priority");
-            }
-            setSearchParams(next);
-          }}
-          className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
-        >
-          {PRIORITY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={priority ?? ""}
+            onChange={(e) => {
+              const next = new URLSearchParams(searchParams);
+              if (e.target.value) {
+                next.set("priority", e.target.value);
+              } else {
+                next.delete("priority");
+              }
+              setSearchParams(next);
+            }}
+            className="rounded-lg border border-night/15 px-3 py-2 text-sm text-ink focus-visible:border-terracotta"
+          >
+            {PRIORITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <DateRangeFilter />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -107,6 +114,11 @@ export function AnalyticsPage() {
           value={formatHours(overview.avg_ticket_resolution_hours)}
           hint="Created to resolved"
         />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <TicketTrendChart title="Week by week" data={overview.weekly_ticket_trend} granularity="week" />
+        <TicketTrendChart title="Month by month" data={overview.monthly_ticket_trend} granularity="month" />
       </div>
 
       <div className="rounded-2xl bg-white p-4 shadow-sm">
