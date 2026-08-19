@@ -223,10 +223,19 @@ def create_ticket(
 
     if direct_to_kam:
         # Routes straight to the KAM's own channel instead of the shared CS
-        # one — "direct to KAM", not just cc'd.
+        # one — "direct to KAM", not just cc'd. Always names the KAM
+        # explicitly (confirmed live 2026-08-19: none of the real KAMs had
+        # ever been given an actual distinct personal slack_channel — all
+        # three were still on the Admin model's shared "#support" default
+        # — so relying on "posted in their own channel" to identify the
+        # recipient left the message with no name and no real Slack
+        # mention/ping at all).
         channel = admin.slack_channel if admin else settings.SLACK_SUPPORT_CHANNEL
         reason = "profile photo change" if always_direct else "priority astrologer"
-        text = f"{header}\n{body}\n*Routed directly to you as their KAM ({reason}).*{cs_line}"
+        text = (
+            f"{header}\n{body}\n*Routed directly to {_slack_mention(admin, kam_name)} "
+            f"as their KAM ({reason}).*{cs_line}"
+        )
     elif is_vip:
         # VIP on any other category: shared channel, but KAM explicitly cc'd.
         channel = settings.SLACK_SUPPORT_CHANNEL

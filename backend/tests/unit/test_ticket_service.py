@@ -121,6 +121,35 @@ def test_vip_priority_ticket_uses_a_real_slack_mention_when_the_kam_has_one_on_f
     assert f"@{seeded_admin.name}" not in entry.message
 
 
+def test_direct_to_kam_ticket_names_the_kam_explicitly_in_slack(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch
+):
+    # Confirmed live 2026-08-19: "profile" (photo_change) tickets go
+    # straight to the KAM's own slack_channel with no explicit name/mention
+    # in the text — fine ONLY if that channel is genuinely personal, but
+    # none of the real KAMs had ever been given one (all still on the
+    # Admin model's shared "#support" default), so the message named no
+    # one and pinged no one. Must always name the KAM regardless of
+    # whether the channel is actually personal.
+    seeded_admin.slack_user_id = "U0123ABC456"
+    db_session.commit()
+    _force_priority(monkeypatch, priority=5)  # low priority — must still go direct for "profile"
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="profile",
+        sub_category="photo_change",
+        description="Wants a new profile photo",
+        description_en="Wants a new profile photo",
+        preferred_language="English",
+    )
+
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert "<@U0123ABC456>" in entry.message
+    assert "Routed directly to you as their KAM" not in entry.message
+
+
 def test_non_vip_priority_ticket_does_not_tag_kam(db_session, seeded_astrologer, monkeypatch):
     # P3+ tickets still go to the shared CS channel and are still assigned
     # to a KAM internally, but the KAM isn't specially paged for them.
@@ -186,7 +215,7 @@ def test_vip_no_visibility_ticket_routes_directly_to_kam_channel(
 
     entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
     assert entry.channel == seeded_admin.slack_channel
-    assert "directly to you as their KAM" in entry.message
+    assert f"directly to @{seeded_admin.name} as their KAM" in entry.message
 
 
 def test_non_vip_no_visibility_ticket_still_uses_shared_channel(
@@ -553,7 +582,7 @@ def test_photo_change_routes_directly_to_kam_regardless_of_priority(
         # slack_client.upload_attachment).
         entries = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).all()
         assert len(entries) == 2
-        text_entry = next(e for e in entries if "directly to you as their KAM" in e.message)
+        text_entry = next(e for e in entries if "as their KAM" in e.message)
         assert text_entry.channel == seeded_admin.slack_channel
         assert ticket.kam_notified is True
         # Photo Change is KAM-only per policy — CS is never looped in, even
