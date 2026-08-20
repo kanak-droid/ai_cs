@@ -2,6 +2,7 @@ import type { AdminTicket } from "@astrohelp/shared";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useAuth } from "../../../auth/AuthContext";
 import { Modal } from "../../../components/Modal";
 import { useAdminsLookup } from "../api/useAdminsLookup";
 import { ReassignTicketForm } from "./ReassignTicketForm";
@@ -24,10 +25,12 @@ function PriorityBadge({ priority }: { priority: number | null }) {
 function AssignedToCell({
   assignedAdminId,
   assignedCsId,
+  canReassign,
   onReassignClick,
 }: {
   assignedAdminId: number | null;
   assignedCsId: number | null;
+  canReassign: boolean;
   onReassignClick: () => void;
 }) {
   const { data: admins } = useAdminsLookup();
@@ -50,22 +53,29 @@ function AssignedToCell({
           {cs.name}
         </span>
       )}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onReassignClick();
-        }}
-        className="mt-0.5 text-left font-medium text-terracotta hover:underline"
-      >
-        Reassign
-      </button>
+      {canReassign && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onReassignClick();
+          }}
+          className="mt-0.5 text-left font-medium text-terracotta hover:underline"
+        >
+          Reassign
+        </button>
+      )}
     </div>
   );
 }
 
 export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
   const navigate = useNavigate();
+  const { admin } = useAuth();
+  // Reassigning ownership is an ADMIN-access-level action (see the
+  // matching backend gate on POST .../reassign) — a normal-access KAM/CS
+  // shouldn't even see the option.
+  const canReassign = admin?.accessLevel === "admin";
   // Tracks which ticket's reassign modal is open — a single piece of state
   // on the table rather than per-row, since only one modal can ever be
   // open at a time.
@@ -112,6 +122,7 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
                 <AssignedToCell
                   assignedAdminId={ticket.assigned_admin_id}
                   assignedCsId={ticket.assigned_cs_id}
+                  canReassign={canReassign}
                   onReassignClick={() => setReassigningTicketId(ticket.id)}
                 />
               </td>

@@ -47,6 +47,7 @@ export function AnalyticsPage() {
   const totalSatisfaction = overview.satisfied_count + overview.unsatisfied_count;
   const satisfiedPct =
     totalSatisfaction > 0 ? Math.round((overview.satisfied_count / totalSatisfaction) * 100) : null;
+  const totalRatings = Object.values(overview.rating_distribution).reduce((sum, n) => sum + n, 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -100,7 +101,7 @@ export function AnalyticsPage() {
         <StatCard
           label="Avg. bot rating"
           value={overview.avg_bot_rating !== null ? overview.avg_bot_rating.toFixed(1) : "—"}
-          hint="out of 5 stars"
+          hint={`out of 5 stars${totalRatings > 0 ? ` · ${totalRatings} rating${totalRatings === 1 ? "" : "s"}` : " · no ratings yet"}`}
         />
       </div>
 

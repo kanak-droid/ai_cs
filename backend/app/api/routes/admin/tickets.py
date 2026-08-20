@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_admin, get_db
+from app.api.deps import get_current_admin, get_db, require_admin_access
 from app.core.security import AdminContext
 from app.integrations import object_storage
 from app.models.enums import TicketStatus
@@ -107,7 +107,10 @@ def escalate_ticket_to_kam(
 def reassign_ticket(
     ticket_id: int,
     body: TicketReassignRequest,
-    admin: AdminContext = Depends(get_current_admin),
+    # Reassigning ownership is an ADMIN-access-level action, same tier as
+    # granting/editing another admin's access — a normal-access KAM/CS
+    # shouldn't be able to move a ticket off of someone else.
+    admin: AdminContext = Depends(require_admin_access),
     db: Session = Depends(get_db),
 ) -> AdminTicketRead:
     ticket = ticket_service.get_ticket(db, ticket_id)

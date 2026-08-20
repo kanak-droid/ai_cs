@@ -1,9 +1,16 @@
 import { useState } from "react";
 
+import { useAuth } from "../../../auth/AuthContext";
 import { ReassignTicketForm } from "./ReassignTicketForm";
 
 export function ReassignTicketControl({ ticketId }: { ticketId: number }) {
   const [open, setOpen] = useState(false);
+  const { admin } = useAuth();
+
+  // Reassigning ownership is an ADMIN-access-level action (see the
+  // matching backend gate on POST .../reassign) — a normal-access KAM/CS
+  // shouldn't even see the option.
+  if (admin?.accessLevel !== "admin") return null;
 
   if (!open) {
     return (
