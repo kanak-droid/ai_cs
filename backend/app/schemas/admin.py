@@ -36,6 +36,7 @@ class AdminRead(BaseModel):
     access_level: AdminAccessLevel
     languages: list[str]
     is_active: bool
+    is_temporarily_inactive: bool
 
 
 class AdminCreateRequest(BaseModel):
@@ -52,6 +53,7 @@ class AdminUpdateRequest(BaseModel):
     access_level: AdminAccessLevel | None = None
     languages: list[str] | None = None
     is_active: bool | None = None
+    is_temporarily_inactive: bool | None = None
     slack_user_id: str | None = None
 
 

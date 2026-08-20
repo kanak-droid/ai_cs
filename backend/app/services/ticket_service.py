@@ -22,14 +22,19 @@ from app.integrations import (
 )
 from app.models.admin import Admin
 from app.models.astrologer import Astrologer
-from app.models.enums import TicketStatus
+from app.models.enums import ADMIN_SETTABLE_STATUSES, AdminRole, TicketStatus
 from app.models.ticket import Ticket
 from app.models.ticket_status_history import TicketStatusHistory
 
 # A resolved ticket the astrologer never responds to (satisfied/unsatisfied)
-# auto-closes after this long — checked lazily on read, not via a background
-# job, since nothing else in this app runs on a schedule.
-_AUTO_CLOSE_AFTER = timedelta(days=5)
+# auto-closes after this long. Shortened from 5 days to 48 hours (2026-08-20)
+# to match the astrologer-facing "resolved" chat notification's own 48h
+# window (see chat-app's persisted ticket-status tracking) — after that, no
+# response is treated the same as a quiet confirmation. Checked lazily on
+# read (here, and in scripts/auto_close_resolved_tickets.py for anyone who
+# wants real promptness via an external cron), not a background job, since
+# nothing else in this app runs on a schedule.
+_AUTO_CLOSE_AFTER = timedelta(hours=48)
 
 # Which team a ticket routes to for the Slack escalation notification — derived
 # from category rather than a separate DB column, so this can change without a
@@ -135,6 +140,16 @@ def _record_status(
         # from an earlier resolve/reopen cycle on this same ticket.
         ticket.resolved_at = utcnow()
         ticket.satisfaction = None
+
+
+def _log_note(db: Session, ticket: Ticket, *, changed_by: str, note: str) -> None:
+    """Records a history row for an event that isn't a status transition
+    (reassignment, escalation) — logs the ticket's CURRENT status verbatim
+    rather than calling _record_status, which must never be used here: on a
+    RESOLVED ticket it would reset resolved_at to now and wipe satisfaction,
+    which a mere ownership/escalation change must never trigger.
+    """
+    db.add(TicketStatusHistory(ticket_id=ticket.id, status=ticket.status, changed_by=changed_by, note=note))
 
 
 def create_ticket(
@@ -264,7 +279,105 @@ def create_ticket(
 def transition_status(
     db: Session, ticket: Ticket, new_status: TicketStatus, *, changed_by: str, note: str | None = None
 ) -> Ticket:
+    """The only entry point for an admin manually moving a ticket's status
+    from the dashboard — enforces two rules specific to a MANUAL admin
+    action (the system/astrologer-driven paths in this module call
+    _record_status directly and are deliberately exempt):
+
+    - only ADMIN_SETTABLE_STATUSES is reachable this way — CLOSED isn't
+      (see that constant's docstring); nothing enforced this before
+      2026-08-20 even though the frontend dropdown already only offered
+      those options, so a direct API call could bypass it.
+    - RESOLVED requires a real, non-blank note — it's what actually
+      reaches the astrologer as the explanation of what was fixed (see the
+      chat-app's status-change notification), so a blank one would leave
+      them with nothing to read.
+    """
+    if new_status not in ADMIN_SETTABLE_STATUSES:
+        raise AppError(f"'{new_status.value}' can't be set manually.")
+    if new_status == TicketStatus.RESOLVED and not (note and note.strip()):
+        raise AppError("A comment is required when marking a ticket resolved.")
+
     _record_status(db, ticket, new_status, changed_by=changed_by, note=note)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def reassign_ticket(
+    db: Session,
+    ticket: Ticket,
+    *,
+    role: str,
+    new_admin_id: int,
+    changed_by: str,
+    note: str | None = None,
+) -> Ticket:
+    """Manually moves ownership of a ticket's KAM or CS to a different
+    admin of that role — e.g. covering for someone on leave, or correcting
+    a bad round-robin pick. Validates the target is a real, currently-
+    assignable admin of the requested role (active, not on leave, correct
+    role) so a ticket can never end up pointed at someone who can't
+    actually work it — the exact same eligibility bar as new-ticket
+    round-robin (admin_mapping_client/cs_assignment_client).
+
+    Does NOT go through _record_status/transition_status — ownership isn't
+    a status transition, and calling that on a RESOLVED ticket would wipe
+    resolved_at/satisfaction as a side effect (see _record_status). Sets
+    kam_notified/cs_notified so the new owner's queue picks it up.
+    """
+    if role not in ("kam", "cs"):
+        raise AppError("role must be 'kam' or 'cs'")
+    target_role = AdminRole.KAM if role == "kam" else AdminRole.CS
+
+    new_admin = db.get(Admin, new_admin_id)
+    if new_admin is None or new_admin.role != target_role:
+        raise AppError(f"Admin {new_admin_id} is not an active {role.upper()}")
+    if not new_admin.is_active or new_admin.is_temporarily_inactive:
+        raise AppError(f"{new_admin.name} isn't currently assignable (inactive or on leave)")
+
+    if role == "kam":
+        ticket.assigned_admin_id = new_admin.id
+        ticket.kam_notified = True
+    else:
+        ticket.assigned_cs_id = new_admin.id
+        ticket.cs_notified = True
+
+    log_line = f"Reassigned {role.upper()} to {new_admin.name}"
+    if note:
+        log_line += f" — {note}"
+    _log_note(db, ticket, changed_by=changed_by, note=log_line)
+
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def escalate_to_kam(db: Session, ticket: Ticket, *, changed_by: str, note: str) -> Ticket:
+    """A CS handing this ticket off to its KAM — e.g. it needs the KAM's
+    personal relationship with the astrologer, or is beyond what CS can
+    resolve alone. Ensures the KAM is actually notified (kam_notified=True,
+    same flag the ticket queue's "assigned to me" filter checks) and flags
+    escalated_to_kam so analytics can exclude this ticket from the CS's
+    "resolved" tally even though assigned_cs_id never changes — the CS
+    stays associated for reference, the KAM is who actually resolves it
+    (see analytics_service._get_kam_performance). A comment is mandatory:
+    escalating with no explanation just leaves the KAM guessing.
+
+    Does not change ticket.status — same reasoning as reassign_ticket (see
+    _log_note): this is a handoff, not a status transition, and must never
+    risk _record_status's RESOLVED side effect.
+    """
+    if not note or not note.strip():
+        raise AppError("A comment is required to escalate this ticket.")
+    if ticket.assigned_admin_id is None:
+        raise AppError("This ticket has no KAM assigned to escalate to.")
+
+    ticket.kam_notified = True
+    ticket.escalated_to_kam = True
+    ticket.escalated_at = utcnow()
+    _log_note(db, ticket, changed_by=changed_by, note=f"Escalated to KAM — {note.strip()}")
+
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -308,25 +421,62 @@ def _maybe_auto_close_stale(db: Session, ticket: Ticket) -> Ticket:
             ticket,
             TicketStatus.CLOSED,
             changed_by="system",
-            note="Auto-closed — no astrologer response after 5 days",
+            note="Auto-closed — no astrologer response after 48 hours",
         )
         db.commit()
         db.refresh(ticket)
     return ticket
 
 
+def auto_close_stale_resolved_tickets(db: Session) -> list[Ticket]:
+    """Batch version of _maybe_auto_close_stale, for an external cron/
+    scheduled job (see scripts/auto_close_resolved_tickets.py, same
+    invocation shape as scripts/sync_sheets.py) — the lazy, checked-on-read
+    version above only closes a ticket once someone happens to load it
+    after the cutoff, which in practice is reliable (both the astrologer's
+    chat and the admin dashboard read through get_ticket/list_all_tickets
+    regularly) but not a hard real-time guarantee. This closes every
+    eligible ticket in one pass regardless of whether anyone's looking, for
+    anyone who wants that stronger guarantee.
+    """
+    cutoff = utcnow() - _AUTO_CLOSE_AFTER
+    stmt = select(Ticket).where(
+        Ticket.status == TicketStatus.RESOLVED,
+        Ticket.satisfaction.is_(None),
+        Ticket.resolved_at.isnot(None),
+        Ticket.resolved_at < cutoff,
+    )
+    tickets = list(db.scalars(stmt).all())
+    for ticket in tickets:
+        _record_status(
+            db,
+            ticket,
+            TicketStatus.CLOSED,
+            changed_by="system",
+            note="Auto-closed — no astrologer response after 48 hours",
+        )
+    db.commit()
+    for ticket in tickets:
+        db.refresh(ticket)
+    return tickets
+
+
 def get_ticket(db: Session, ticket_id: int) -> Ticket:
     ticket = db.get(Ticket, ticket_id)
     if ticket is None:
         raise NotFoundError(f"Ticket {ticket_id} not found")
-    return ticket
+    # Checked here (not just on the astrologer-facing path) so an admin
+    # viewing a ticket also sees a correctly-closed status, regardless of
+    # whether the astrologer's own app has polled recently — see
+    # _maybe_auto_close_stale.
+    return _maybe_auto_close_stale(db, ticket)
 
 
 def get_ticket_for_astrologer(db: Session, ticket_id: int, astrologer_id: int) -> Ticket:
     ticket = get_ticket(db, ticket_id)
     if ticket.astrologer_id != astrologer_id:
         raise NotFoundError(f"Ticket {ticket_id} not found")
-    return _maybe_auto_close_stale(db, ticket)
+    return ticket
 
 
 def list_tickets_for_astrologer(db: Session, astrologer_id: int) -> list[Ticket]:
@@ -392,10 +542,11 @@ def list_all_tickets(
         stmt = stmt.order_by(Ticket.created_at.desc())
         tickets = list(db.scalars(stmt).all())
         tickets.sort(key=lambda t: queue_performance_client.priority_sort_key(db, t.astrologer_id))
-        return tickets
+        return [_maybe_auto_close_stale(db, t) for t in tickets]
 
     stmt = stmt.order_by(Ticket.created_at.desc() if sort == "desc" else Ticket.created_at.asc())
-    return list(db.scalars(stmt).all())
+    tickets = list(db.scalars(stmt).all())
+    return [_maybe_auto_close_stale(db, t) for t in tickets]
 
 
 def attach_astrologer_priority(db: Session, tickets: list[Ticket]) -> None:

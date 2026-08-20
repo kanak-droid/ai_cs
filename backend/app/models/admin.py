@@ -44,6 +44,16 @@ class Admin(Base):
     # language-blind for them) but not restricted to CS at the DB level.
     languages: Mapped[list[str]] = mapped_column(ARRAY(String(40)), default=list)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Temporary, reversible "on leave" state — distinct from is_active
+    # (permanent deactivation). An on-leave admin keeps is_active=True: they
+    # stay visible everywhere is_active already gates (admin lists, the
+    # ticket queue's assigned-admin lookup, KAM/CS performance), so their
+    # EXISTING tickets keep rendering correctly (unlike permanent
+    # deactivation, which excludes them from that lookup and makes assigned
+    # tickets render as unassigned — see docs/chatbot-approach.md). Only
+    # gates NEW round-robin assignment (admin_mapping_client/
+    # cs_assignment_client) — never touches existing ticket assignments.
+    is_temporarily_inactive: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     astrologers: Mapped[list["Astrologer"]] = relationship(back_populates="assigned_admin")

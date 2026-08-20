@@ -389,8 +389,12 @@ def test_create_support_ticket_allows_a_new_ticket_after_the_first_resolves(
         ctx,
     )
     ticket = ticket_service.get_ticket(db_session, first.metadata["created_ticket_id"])
-    ticket_service.transition_status(db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example")
-    ticket_service.transition_status(db_session, ticket, TicketStatus.CLOSED, changed_by="admin@test.example")
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+    # CLOSED is no longer manually settable — reach it the real way, via
+    # the astrologer confirming it's fixed.
+    ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
 
     second = executor.execute(
         "create_support_ticket",

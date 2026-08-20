@@ -28,8 +28,16 @@ def get_assigned_cs(db: Session, *, ticket_id: int, astrologer_language: str) ->
     if not MOCK_MODE:
         raise NotImplementedError("Real CS-assignment integration is not wired up yet.")
 
+    # is_temporarily_inactive excluded same as permanent deactivation for NEW
+    # assignment purposes — see admin_mapping_client.fetch_active_kams.
     cs_admins = list(
-        db.scalars(select(Admin).where(Admin.is_active, Admin.role == AdminRole.CS)).all()
+        db.scalars(
+            select(Admin).where(
+                Admin.is_active,
+                Admin.is_temporarily_inactive.is_(False),
+                Admin.role == AdminRole.CS,
+            )
+        ).all()
     )
     if not cs_admins:
         return None

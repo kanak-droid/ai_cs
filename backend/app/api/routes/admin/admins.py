@@ -60,11 +60,19 @@ def update_admin(
     admin: AdminContext = Depends(require_admin_access),
     db: Session = Depends(get_db),
 ) -> AdminRead:
-    """Lets an ADMIN-access admin activate/deactivate a profile, change its
-    KAM/CS role, or change its access level — e.g. deactivating the
-    placeholder seed admins once real KAMs/CS are onboarded, without
-    deleting their ticket history. Changing access_level resets the target's
-    password to the new tier's shared password, same as grant_access.
+    """Lets an ADMIN-access admin activate/deactivate a profile, mark it
+    temporarily on leave, change its KAM/CS role, or change its access
+    level — e.g. deactivating the placeholder seed admins once real KAMs/CS
+    are onboarded, without deleting their ticket history. Changing
+    access_level resets the target's password to the new tier's shared
+    password, same as grant_access.
+
+    is_temporarily_inactive vs is_active: on-leave (is_temporarily_inactive)
+    is a short, reversible break — is_active stays True the whole time, so
+    they keep appearing everywhere an active admin does (admin lists, the
+    ticket queue's assigned-admin lookup) and their existing tickets keep
+    showing correctly. It only excludes them from NEW round-robin
+    assignment. is_active=False is the permanent case.
     """
     target = db.get(Admin, admin_id)
     if target is None:
@@ -79,6 +87,8 @@ def update_admin(
         target.languages = body.languages
     if body.is_active is not None:
         target.is_active = body.is_active
+    if body.is_temporarily_inactive is not None:
+        target.is_temporarily_inactive = body.is_temporarily_inactive
     if body.slack_user_id is not None:
         target.slack_user_id = body.slack_user_id
 

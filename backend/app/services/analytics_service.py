@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.integrations import queue_performance_client
 from app.models.admin import Admin
 from app.models.chat_session import ChatSession
-from app.models.enums import SessionResolution, TicketStatus
+from app.models.enums import AdminRole, SessionResolution, TicketStatus
 from app.models.ticket import Ticket
 
 _TERMINAL_STATUSES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
@@ -97,7 +97,17 @@ def _get_kam_performance(
 
         assigned_count = base_query.count()
         pending_count = base_query.filter(Ticket.status.not_in(_TERMINAL_STATUSES)).count()
-        solved_count = base_query.filter(Ticket.status.in_(_TERMINAL_STATUSES)).count()
+        # A ticket a CS escalated to the KAM was resolved BY THE KAM, not
+        # this CS — exclude it from the CS's own "solved" tally even though
+        # assigned_cs_id never changes on escalation (see
+        # ticket_service.escalate_to_kam). Doesn't apply to KAM rows: a KAM
+        # resolving an escalated ticket legitimately counts it.
+        solved_query = base_query.filter(Ticket.status.in_(_TERMINAL_STATUSES))
+        escalated_count = 0
+        if admin.role == AdminRole.CS:
+            escalated_count = base_query.filter(Ticket.escalated_to_kam.is_(True)).count()
+            solved_query = solved_query.filter(Ticket.escalated_to_kam.is_(False))
+        solved_count = solved_query.count()
         avg_tat_hours = (
             base_query.filter(Ticket.resolved_at.isnot(None))
             .with_entities(func.avg(func.extract("epoch", Ticket.resolved_at - Ticket.created_at)) / 3600)
@@ -111,6 +121,8 @@ def _get_kam_performance(
                 "pending_count": pending_count,
                 "assigned_count": assigned_count,
                 "solved_count": solved_count,
+                # Only meaningful for CS rows — always 0 for KAM (see above).
+                "escalated_to_kam_count": escalated_count,
                 "avg_tat_hours": float(avg_tat_hours) if avg_tat_hours is not None else None,
             }
         )

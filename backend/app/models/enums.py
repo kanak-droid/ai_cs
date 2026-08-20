@@ -11,12 +11,17 @@ class TicketStatus(str, enum.Enum):
 
 
 # Statuses an admin may move a ticket to manually from the dashboard.
-# SUBMITTED and ASSIGNED_TO_KAM are only ever set automatically on ticket creation.
+# SUBMITTED and ASSIGNED_TO_KAM are only ever set automatically on ticket
+# creation. CLOSED is deliberately excluded (2026-08-20): the only manual
+# terminal state is RESOLVED — closing is now always either the astrologer
+# confirming it's fixed, or the 48h auto-close when they never respond (see
+# ticket_service.record_satisfaction / _maybe_auto_close_stale), never a
+# direct admin action. CLOSED itself stays a real, reachable TicketStatus
+# value — just not one an admin can jump to manually.
 ADMIN_SETTABLE_STATUSES = (
     TicketStatus.UNDER_REVIEW,
     TicketStatus.IN_PROGRESS,
     TicketStatus.RESOLVED,
-    TicketStatus.CLOSED,
 )
 
 

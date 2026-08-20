@@ -9,7 +9,12 @@ from app.core.security import AdminContext
 from app.integrations import object_storage
 from app.models.enums import TicketStatus
 from app.schemas.admin import AdminTicketRead
-from app.schemas.ticket import AttachmentPreviewResponse, TicketStatusUpdateRequest
+from app.schemas.ticket import (
+    AttachmentPreviewResponse,
+    TicketEscalateRequest,
+    TicketReassignRequest,
+    TicketStatusUpdateRequest,
+)
 from app.services import ticket_service
 
 router = APIRouter(tags=["admin"])
@@ -80,6 +85,39 @@ def update_ticket_status(
     ticket = ticket_service.get_ticket(db, ticket_id)
     ticket = ticket_service.transition_status(
         db, ticket, body.status, changed_by=admin.email, note=body.note
+    )
+    ticket_service.attach_astrologer_priority(db, [ticket])
+    return AdminTicketRead.model_validate(ticket)
+
+
+@router.post("/api/admin/tickets/{ticket_id}/escalate", response_model=AdminTicketRead)
+def escalate_ticket_to_kam(
+    ticket_id: int,
+    body: TicketEscalateRequest,
+    admin: AdminContext = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> AdminTicketRead:
+    ticket = ticket_service.get_ticket(db, ticket_id)
+    ticket = ticket_service.escalate_to_kam(db, ticket, changed_by=admin.email, note=body.note)
+    ticket_service.attach_astrologer_priority(db, [ticket])
+    return AdminTicketRead.model_validate(ticket)
+
+
+@router.post("/api/admin/tickets/{ticket_id}/reassign", response_model=AdminTicketRead)
+def reassign_ticket(
+    ticket_id: int,
+    body: TicketReassignRequest,
+    admin: AdminContext = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> AdminTicketRead:
+    ticket = ticket_service.get_ticket(db, ticket_id)
+    ticket = ticket_service.reassign_ticket(
+        db,
+        ticket,
+        role=body.role,
+        new_admin_id=body.admin_id,
+        changed_by=admin.email,
+        note=body.note,
     )
     ticket_service.attach_astrologer_priority(db, [ticket])
     return AdminTicketRead.model_validate(ticket)

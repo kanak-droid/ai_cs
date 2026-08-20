@@ -57,6 +57,13 @@ class Ticket(Base):
     # "satisfied" | "unsatisfied" | None — the astrologer's response to the
     # most recent resolution. Only ticket_service.record_satisfaction writes this.
     satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Set by ticket_service.escalate_to_kam — a CS-initiated handoff to the
+    # KAM, distinct from the routing decided at creation (kam_notified
+    # above). Exists so analytics can exclude an escalated ticket from a
+    # CS's "resolved" tally even though assigned_cs_id never changes (the CS
+    # stays associated for reference; the KAM is who actually resolves it).
+    escalated_to_kam: Mapped[bool] = mapped_column(default=False)
+    escalated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

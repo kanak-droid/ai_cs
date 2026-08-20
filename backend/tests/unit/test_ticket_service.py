@@ -39,7 +39,7 @@ def _make_resolved_ticket(db_session, seeded_astrologer):
         preferred_language="English",
     )
     return ticket_service.transition_status(
-        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed the issue"
     )
 
 
@@ -248,14 +248,13 @@ def test_status_always_mirrors_latest_history(db_session, seeded_astrologer):
         preferred_language="English",
     )
 
-    for status in (
-        TicketStatus.UNDER_REVIEW,
-        TicketStatus.IN_PROGRESS,
-        TicketStatus.RESOLVED,
-        TicketStatus.CLOSED,
-    ):
+    # CLOSED isn't in this loop — it's no longer a manually-settable status
+    # (see ADMIN_SETTABLE_STATUSES); only record_satisfaction/auto-close can
+    # reach it now, covered by their own tests below.
+    for status in (TicketStatus.UNDER_REVIEW, TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED):
+        note = "Fixed the issue" if status == TicketStatus.RESOLVED else None
         ticket = ticket_service.transition_status(
-            db_session, ticket, status, changed_by="admin@test.example"
+            db_session, ticket, status, changed_by="admin@test.example", note=note
         )
         assert ticket.status == status
         assert ticket.history[-1].status == status
@@ -300,15 +299,15 @@ def test_resolving_a_ticket_clears_any_earlier_satisfaction(db_session, seeded_a
     assert ticket.satisfaction == "unsatisfied"
 
     ticket = ticket_service.transition_status(
-        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed again"
     )
 
     assert ticket.satisfaction is None
 
 
-def test_stale_resolved_ticket_auto_closes_after_5_days(db_session, seeded_astrologer):
+def test_stale_resolved_ticket_auto_closes_after_48_hours(db_session, seeded_astrologer):
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
-    ticket.resolved_at = utcnow() - timedelta(days=6)
+    ticket.resolved_at = utcnow() - timedelta(hours=49)
     db_session.commit()
 
     ticket = ticket_service.get_ticket_for_astrologer(db_session, ticket.id, seeded_astrologer.id)
@@ -317,11 +316,86 @@ def test_stale_resolved_ticket_auto_closes_after_5_days(db_session, seeded_astro
     assert ticket.history[-1].changed_by == "system"
 
 
+def test_admin_reading_a_stale_resolved_ticket_also_auto_closes_it(db_session, seeded_astrologer):
+    # The lazy check used to only run on the astrologer-facing read path —
+    # an admin viewing the same ticket must see it correctly closed too,
+    # regardless of whether the astrologer's app has polled recently.
+    ticket = _make_resolved_ticket(db_session, seeded_astrologer)
+    ticket.resolved_at = utcnow() - timedelta(hours=49)
+    db_session.commit()
+
+    ticket = ticket_service.get_ticket(db_session, ticket.id)
+
+    assert ticket.status == TicketStatus.CLOSED
+
+
 def test_recently_resolved_ticket_does_not_auto_close(db_session, seeded_astrologer):
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
 
     ticket = ticket_service.get_ticket_for_astrologer(db_session, ticket.id, seeded_astrologer.id)
 
+    assert ticket.status == TicketStatus.RESOLVED
+
+
+def test_auto_close_stale_resolved_tickets_closes_only_eligible_ones(db_session, seeded_astrologer):
+    stale = _make_resolved_ticket(db_session, seeded_astrologer)
+    stale.resolved_at = utcnow() - timedelta(hours=49)
+    fresh = _make_resolved_ticket(db_session, seeded_astrologer)
+    db_session.commit()
+
+    closed = ticket_service.auto_close_stale_resolved_tickets(db_session)
+
+    assert [t.id for t in closed] == [stale.id]
+    db_session.refresh(stale)
+    db_session.refresh(fresh)
+    assert stale.status == TicketStatus.CLOSED
+    assert fresh.status == TicketStatus.RESOLVED
+
+
+def test_transition_status_rejects_a_status_not_manually_settable(db_session, seeded_astrologer):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    with pytest.raises(AppError):
+        ticket_service.transition_status(
+            db_session, ticket, TicketStatus.CLOSED, changed_by="admin@test.example"
+        )
+    with pytest.raises(AppError):
+        ticket_service.transition_status(
+            db_session, ticket, TicketStatus.SUBMITTED, changed_by="admin@test.example"
+        )
+
+
+def test_transition_status_requires_a_comment_to_resolve(db_session, seeded_astrologer):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    with pytest.raises(AppError):
+        ticket_service.transition_status(
+            db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        )
+    with pytest.raises(AppError):
+        ticket_service.transition_status(
+            db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="   "
+        )
+    # A real comment succeeds.
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it"
+    )
     assert ticket.status == TicketStatus.RESOLVED
 
 
@@ -346,7 +420,9 @@ def test_get_active_ticket_for_category_finds_an_open_ticket(db_session, seeded_
 
 def test_get_active_ticket_for_category_ignores_resolved_and_closed(db_session, seeded_astrologer):
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
-    ticket_service.transition_status(db_session, ticket, TicketStatus.CLOSED, changed_by="admin@test.example")
+    # CLOSED is no longer a manually-settable status — reach it the same
+    # way a real ticket does now, via the astrologer confirming it's fixed.
+    ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
 
     found = ticket_service.get_active_ticket_for_category(
         db_session, seeded_astrologer.id, "technical"
@@ -417,7 +493,7 @@ def test_list_all_tickets_filters_by_status_and_admin(db_session, seeded_astrolo
         preferred_language="English",
     )
     ticket_service.transition_status(
-        db_session, t1, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        db_session, t1, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
     )
 
     results = ticket_service.list_all_tickets(db_session, status=TicketStatus.RESOLVED)
@@ -468,6 +544,196 @@ def test_list_all_tickets_filters_by_date_range(db_session, seeded_astrologer):
         db_session, date_from=date(2026, 8, 10), date_to=date(2026, 8, 10)
     )
     assert in_range.id in [t.id for t in same_day]
+
+
+def test_reassign_ticket_moves_kam_ownership_and_notifies_the_new_kam(
+    db_session, seeded_astrologer, seeded_admin
+):
+    other_kam = Admin(name="Other KAM", email="otherkam@test.example", role=AdminRole.KAM)
+    db_session.add(other_kam)
+    db_session.commit()
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    ticket = ticket_service.reassign_ticket(
+        db_session,
+        ticket,
+        role="kam",
+        new_admin_id=other_kam.id,
+        changed_by="admin@test.example",
+        note="Covering for original KAM",
+    )
+
+    assert ticket.assigned_admin_id == other_kam.id
+    assert ticket.kam_notified is True
+    last_entry = ticket.history[-1]
+    assert "Other KAM" in last_entry.note
+    assert "Covering for original KAM" in last_entry.note
+
+
+def test_reassign_ticket_rejects_an_admin_of_the_wrong_role(
+    db_session, seeded_astrologer, seeded_admin
+):
+    cs_admin = Admin(name="A CS", email="acs@test.example", role=AdminRole.CS)
+    db_session.add(cs_admin)
+    db_session.commit()
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    with pytest.raises(AppError):
+        ticket_service.reassign_ticket(
+            db_session, ticket, role="kam", new_admin_id=cs_admin.id, changed_by="admin@test.example"
+        )
+
+
+def test_reassign_ticket_rejects_an_admin_on_leave(db_session, seeded_astrologer, seeded_admin):
+    on_leave_kam = Admin(
+        name="On Leave KAM",
+        email="onleavekam@test.example",
+        role=AdminRole.KAM,
+        is_temporarily_inactive=True,
+    )
+    db_session.add(on_leave_kam)
+    db_session.commit()
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    with pytest.raises(AppError):
+        ticket_service.reassign_ticket(
+            db_session,
+            ticket,
+            role="kam",
+            new_admin_id=on_leave_kam.id,
+            changed_by="admin@test.example",
+        )
+
+
+def test_reassigning_a_resolved_ticket_does_not_reset_its_resolution(
+    db_session, seeded_astrologer, seeded_admin
+):
+    # A real risk with reusing _record_status for this: on a RESOLVED
+    # ticket it resets resolved_at to now and wipes satisfaction as a side
+    # effect — a mere ownership change must never trigger that. See
+    # ticket_service._log_note.
+    other_kam = Admin(name="Other KAM", email="otherkam2@test.example", role=AdminRole.KAM)
+    db_session.add(other_kam)
+    db_session.commit()
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it"
+    )
+    ticket = ticket_service.record_satisfaction(db_session, ticket, satisfied=False)  # reopens to under_review
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it again"
+    )
+    original_resolved_at = ticket.resolved_at
+    assert ticket.satisfaction is None
+
+    ticket = ticket_service.reassign_ticket(
+        db_session, ticket, role="kam", new_admin_id=other_kam.id, changed_by="admin@test.example"
+    )
+
+    assert ticket.status == TicketStatus.RESOLVED
+    assert ticket.resolved_at == original_resolved_at
+    assert ticket.satisfaction is None
+
+
+def test_escalate_to_kam_requires_a_comment(db_session, seeded_astrologer, seeded_admin):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    with pytest.raises(AppError):
+        ticket_service.escalate_to_kam(db_session, ticket, changed_by="cs@test.example", note="")
+    with pytest.raises(AppError):
+        ticket_service.escalate_to_kam(db_session, ticket, changed_by="cs@test.example", note="   ")
+
+
+def test_escalate_to_kam_flags_the_ticket_and_notifies_the_kam(
+    db_session, seeded_astrologer, seeded_admin
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    ticket = ticket_service.escalate_to_kam(
+        db_session, ticket, changed_by="cs@test.example", note="Needs the KAM's relationship here"
+    )
+
+    assert ticket.escalated_to_kam is True
+    assert ticket.escalated_at is not None
+    assert ticket.kam_notified is True
+    assert "Needs the KAM's relationship here" in ticket.history[-1].note
+
+
+def test_escalating_a_resolved_ticket_does_not_reset_its_resolution(
+    db_session, seeded_astrologer, seeded_admin
+):
+    # Same class of risk as reassign_ticket — escalation must never touch
+    # resolved_at/satisfaction via _record_status. See ticket_service._log_note.
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+    original_resolved_at = ticket.resolved_at
+
+    ticket = ticket_service.escalate_to_kam(
+        db_session, ticket, changed_by="cs@test.example", note="Actually needs KAM review"
+    )
+
+    assert ticket.status == TicketStatus.RESOLVED
+    assert ticket.resolved_at == original_resolved_at
+    assert ticket.satisfaction is None
 
 
 def test_cs_admins_are_never_round_robin_assigned(db_session, seeded_admin):

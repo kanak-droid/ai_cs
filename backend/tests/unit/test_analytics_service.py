@@ -43,7 +43,7 @@ def test_overview_counts_ticket_satisfaction(db_session, seeded_astrologer):
         preferred_language="English",
     )
     ticket = ticket_service.transition_status(
-        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
     )
     ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
 
@@ -86,7 +86,7 @@ def test_kam_performance_counts_pending_assigned_and_solved(
         preferred_language="English",
     )
     ticket_service.transition_status(
-        db_session, solved, TicketStatus.RESOLVED, changed_by="admin@test.example"
+        db_session, solved, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
     )
 
     overview = analytics_service.get_overview(db_session)
@@ -183,6 +183,44 @@ def test_kam_performance_respects_date_range(db_session, seeded_astrologer, seed
     )
     row = next(r for r in overview["kam_performance"] if r["admin_id"] == seeded_admin.id)
     assert row["assigned_count"] == 0
+
+
+def test_escalated_ticket_is_excluded_from_the_cs_solved_tally(
+    db_session, seeded_astrologer, seeded_admin
+):
+    from app.models.admin import Admin
+    from app.models.enums import AdminRole
+
+    cs_admin = Admin(name="CS One", email="csone@test.example", role=AdminRole.CS)
+    db_session.add(cs_admin)
+    db_session.commit()
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    assert ticket.assigned_cs_id == cs_admin.id  # sanity check: only CS in the pool
+
+    ticket_service.escalate_to_kam(db_session, ticket, changed_by="cs@test.example", note="Needs KAM")
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+
+    overview = analytics_service.get_overview(db_session)
+
+    cs_row = next(r for r in overview["kam_performance"] if r["admin_id"] == cs_admin.id)
+    assert cs_row["solved_count"] == 0
+    assert cs_row["escalated_to_kam_count"] == 1
+
+    # The KAM legitimately resolved it — still counts for them.
+    kam_row = next(r for r in overview["kam_performance"] if r["admin_id"] == seeded_admin.id)
+    assert kam_row["solved_count"] == 1
+    assert kam_row["escalated_to_kam_count"] == 0
 
 
 def test_weekly_and_monthly_ticket_trend_bucket_by_created_date(db_session, seeded_astrologer):

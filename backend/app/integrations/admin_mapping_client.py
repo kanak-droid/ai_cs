@@ -31,10 +31,17 @@ def fetch_active_kams(db: Session) -> list[Admin]:
     # Only KAMs are ever a ticket's "assigned admin" — CS is a separate,
     # language-routed pool (see cs_assignment_client), so CS admins never
     # enter this pool even though they have full dashboard access (see the
-    # approach doc §7b).
+    # approach doc §7b). Also excludes anyone on leave (is_temporarily_
+    # inactive) — same as permanent deactivation for the purpose of NEW
+    # assignment, even though on-leave admins otherwise still count as
+    # is_active=True everywhere else (see Admin model's docstring).
     stmt = (
         select(Admin)
-        .where(Admin.is_active, Admin.role == AdminRole.KAM)
+        .where(
+            Admin.is_active,
+            Admin.is_temporarily_inactive.is_(False),
+            Admin.role == AdminRole.KAM,
+        )
         .order_by(Admin.id)
     )
     kams = list(db.scalars(stmt).all())

@@ -64,3 +64,16 @@ def test_ignores_inactive_and_non_cs_admins(db_session):
     result = cs_assignment_client.get_assigned_cs(db_session, ticket_id=0, astrologer_language="Hindi")
 
     assert result is None
+
+
+def test_ignores_a_cs_admin_on_leave(db_session):
+    # On leave (is_temporarily_inactive) must be excluded from NEW
+    # assignment the same as permanent deactivation, even though the admin
+    # otherwise stays is_active=True (see Admin model's docstring).
+    on_leave = _make_cs(db_session, "OnLeaveCS", ["Hindi"])
+    on_leave.is_temporarily_inactive = True
+    db_session.commit()
+
+    result = cs_assignment_client.get_assigned_cs(db_session, ticket_id=0, astrologer_language="Hindi")
+
+    assert result is None

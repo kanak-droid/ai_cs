@@ -32,6 +32,8 @@ class TicketRead(BaseModel):
     status: TicketStatus
     resolved_at: datetime | None = None
     satisfaction: str | None = None
+    escalated_to_kam: bool
+    escalated_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     history: list[TicketStatusHistoryRead] = []
@@ -44,6 +46,18 @@ class TicketStatusUpdateRequest(BaseModel):
 
 class TicketSatisfactionRequest(BaseModel):
     satisfied: bool
+
+
+class TicketReassignRequest(BaseModel):
+    role: str  # "kam" | "cs"
+    admin_id: int
+    note: str | None = None
+
+
+class TicketEscalateRequest(BaseModel):
+    # Mandatory — a CS escalating to a KAM must explain why (see
+    # ticket_service.escalate_to_kam).
+    note: str
 
 
 class AttachmentPreviewResponse(BaseModel):

@@ -13,6 +13,9 @@ class KamPerformance(BaseModel):
     pending_count: int
     assigned_count: int
     solved_count: int
+    # Only meaningful for CS rows — tickets they escalated to the KAM,
+    # already excluded from solved_count above. Always 0 for KAM rows.
+    escalated_to_kam_count: int
     # Average hours from ticket creation to resolution, for tickets they
     # solved — None if they haven't solved any yet.
     avg_tat_hours: float | None = None
