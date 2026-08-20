@@ -18,4 +18,9 @@ export interface DisplayMessage {
   // got resolved — renders inline Satisfied/Not satisfied buttons for that
   // ticket id. Cleared once the astrologer responds.
   ticketSatisfactionPrompt?: number;
+  // Set on the plain ticket-status-change announcements (any transition
+  // other than the resolved prompt above) — excludes them from the
+  // unrelated "did this solve it?" bot resolve-confirm button, which
+  // otherwise attaches to any assistant message that happens to be last.
+  isTicketStatusUpdate?: boolean;
 }

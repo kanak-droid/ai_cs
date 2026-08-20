@@ -38,6 +38,7 @@ export function MessageList({
           showResolvePrompt={
             !chatClosed &&
             !message.showFeedback &&
+            !message.isTicketStatusUpdate &&
             message.ticketSatisfactionPrompt === undefined &&
             message.role === "assistant" &&
             message.id !== "welcome" &&

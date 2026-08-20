@@ -28,3 +28,16 @@ export function updateTicketStatus(
 ): Promise<AdminTicket> {
   return api.patch<AdminTicket>(`/api/admin/tickets/${id}`, { status, note });
 }
+
+export function reassignTicket(
+  id: number,
+  role: "kam" | "cs",
+  adminId: number,
+  note?: string,
+): Promise<AdminTicket> {
+  return api.post<AdminTicket>(`/api/admin/tickets/${id}/reassign`, { role, admin_id: adminId, note });
+}
+
+export function escalateTicket(id: number, note: string): Promise<AdminTicket> {
+  return api.post<AdminTicket>(`/api/admin/tickets/${id}/escalate`, { note });
+}

@@ -17,6 +17,11 @@ export interface Admin {
   access_level: AdminAccessLevel;
   languages: string[];
   is_active: boolean;
+  // Temporary, reversible "on leave" state — distinct from is_active
+  // (permanent deactivation). Stays is_active=true while on leave, so they
+  // keep showing everywhere an active admin does; only excluded from NEW
+  // ticket round-robin. See backend Admin model's docstring.
+  is_temporarily_inactive: boolean;
 }
 
 export interface AdminTicket extends Ticket {
@@ -53,6 +58,9 @@ export interface KamPerformance {
   pending_count: number;
   assigned_count: number;
   solved_count: number;
+  // Only meaningful for CS rows — tickets they escalated to the KAM,
+  // already excluded from solved_count above. Always 0 for KAM rows.
+  escalated_to_kam_count: number;
   // Average hours from ticket creation to resolution, for tickets they
   // solved — null if they haven't solved any yet.
   avg_tat_hours: number | null;

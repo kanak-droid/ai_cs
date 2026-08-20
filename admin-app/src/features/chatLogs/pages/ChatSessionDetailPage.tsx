@@ -30,11 +30,18 @@ export function ChatSessionDetailPage() {
           )}
         </div>
         <p className="text-sm text-night/50">
-          {session.resolved_by === null
-            ? "Still active"
-            : session.resolved_by === "bot"
-              ? "Resolved by the bot"
-              : `Escalated to ticket #${session.ticket_id}`}
+          {session.resolved_by === null ? (
+            "Still active"
+          ) : session.resolved_by === "bot" ? (
+            "Resolved by the bot"
+          ) : (
+            <>
+              Escalated to ticket{" "}
+              <Link to={`/tickets/${session.ticket_id}`} className="font-medium text-terracotta hover:underline">
+                #{session.ticket_id}
+              </Link>
+            </>
+          )}
           {session.category && ` · ${session.category.replace(/_/g, " ")}`}
         </p>
       </div>

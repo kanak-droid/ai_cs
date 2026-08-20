@@ -7,6 +7,8 @@ import { AssignedToCard } from "../components/AssignedToCard";
 import { AttachmentPreview } from "../components/AttachmentPreview";
 import { ContactInfoCard } from "../components/ContactInfoCard";
 import { DescriptionPanel } from "../components/DescriptionPanel";
+import { EscalateToKamControl } from "../components/EscalateToKamControl";
+import { ReassignTicketControl } from "../components/ReassignTicketControl";
 import { StatusUpdateControl } from "../components/StatusUpdateControl";
 import { TicketHistoryList } from "../components/TicketHistoryList";
 import { TicketStatusBadge } from "../components/TicketStatusBadge";
@@ -63,6 +65,8 @@ export function TicketDetailPage() {
             kamNotified={ticket.kam_notified}
             csNotified={ticket.cs_notified}
           />
+          <ReassignTicketControl ticketId={ticket.id} />
+          <EscalateToKamControl ticketId={ticket.id} escalatedToKam={ticket.escalated_to_kam} />
           <StatusUpdateControl ticketId={ticket.id} currentStatus={ticket.status} />
         </div>
       </div>

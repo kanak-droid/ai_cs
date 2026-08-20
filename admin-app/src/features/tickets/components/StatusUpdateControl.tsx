@@ -16,10 +16,16 @@ export function StatusUpdateControl({
   const update = useUpdateTicketStatus(ticketId);
 
   const hasChange = nextStatus !== currentStatus;
+  const isResolving = nextStatus === "resolved";
+  const trimmedNote = note.trim();
+  // A comment is mandatory when resolving — it's what actually reaches the
+  // astrologer as the explanation of what was fixed (see the chat-app's
+  // status-change notification and ticket_service.transition_status).
+  const canConfirm = hasChange && (!isResolving || trimmedNote.length > 0);
 
   function handleConfirm() {
     update.mutate(
-      { status: nextStatus, note: note.trim() || undefined },
+      { status: nextStatus, note: trimmedNote || undefined },
       { onSuccess: () => setNote("") },
     );
   }
@@ -42,11 +48,13 @@ export function StatusUpdateControl({
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Add a note (optional)"
+          placeholder={
+            isResolving ? "What was fixed? (required — the astrologer sees this)" : "Add a note (optional)"
+          }
           rows={2}
           className="w-full resize-none rounded-lg border border-night/15 px-3 py-2 text-sm text-ink placeholder:text-night/40 focus-visible:border-terracotta"
         />
-        <Button onClick={handleConfirm} disabled={!hasChange || update.isPending}>
+        <Button onClick={handleConfirm} disabled={!canConfirm || update.isPending}>
           {update.isPending ? "Updating…" : `Confirm: mark as ${STATUS_LABELS[nextStatus]}`}
         </Button>
         {update.isError && <p className="text-sm text-clay">Couldn't update — please try again.</p>}

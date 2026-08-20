@@ -1,11 +1,22 @@
-import { ADMIN_SETTABLE_STATUSES, STATUS_LABELS, type TicketStatus } from "@astrohelp/shared";
+import { STATUS_LABELS, type TicketStatus } from "@astrohelp/shared";
 import { useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../../auth/AuthContext";
 import { DateRangeFilter } from "../../../components/DateRangeFilter";
 import { useAdminsLookup } from "../api/useAdminsLookup";
 
-const ALL_STATUSES: TicketStatus[] = ["submitted", "assigned_to_kam", ...ADMIN_SETTABLE_STATUSES];
+// All queryable statuses for the FILTER dropdown — deliberately not just
+// ADMIN_SETTABLE_STATUSES, which now excludes "closed" (an admin can't set
+// it manually anymore, but tickets still reach it via astrologer
+// confirmation/48h auto-close, and admins still need to filter for them).
+const ALL_STATUSES: TicketStatus[] = [
+  "submitted",
+  "assigned_to_kam",
+  "under_review",
+  "in_progress",
+  "resolved",
+  "closed",
+];
 
 export function TicketFilters() {
   const [searchParams, setSearchParams] = useSearchParams();

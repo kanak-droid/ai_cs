@@ -29,6 +29,11 @@ export interface Ticket {
   status: TicketStatus;
   resolved_at: string | null;
   satisfaction: "satisfied" | "unsatisfied" | null;
+  // Set by a CS escalating to the KAM (see the "Escalate to KAM" action) —
+  // excludes this ticket from a CS's "resolved" tally in analytics even
+  // though assigned_cs_id doesn't change.
+  escalated_to_kam: boolean;
+  escalated_at: string | null;
   created_at: string;
   updated_at: string;
   history: TicketStatusHistoryEntry[];

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatHistoryTurn } from "@astrohelp/shared";
+import { STATUS_LABELS, type ChatHistoryTurn } from "@astrohelp/shared";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAstrologer } from "../../../session/AstrologerContext";
@@ -42,6 +42,13 @@ function toHistory(messages: DisplayMessage[]): ChatHistoryTurn[] {
     .map((m) => ({ role: m.role, text: m.backendText ?? m.text }));
 }
 
+// "no_visibility" -> "no visibility" — same convention admin-app uses when
+// displaying a ticket's category, so the astrologer sees the same plain
+// phrasing an admin would.
+function categoryLabel(category: string): string {
+  return category.replace(/_/g, " ");
+}
+
 function welcomeMessage(astrologer: { name: string } | null): DisplayMessage {
   const greeting = astrologer
     ? `Hi ${casualFirstName(astrologer.name)}, how can I help you today?`
@@ -78,6 +85,14 @@ export function ChatPage() {
   const announcedResolvedTicketIds = useRef<Set<number>>(
     new Set(persisted?.announcedResolvedTicketIds ?? []),
   );
+  // NOT persisted — deliberately reseeds fresh on every mount, so a
+  // ticket's pre-existing status (from before this chat page was ever
+  // opened, or from an earlier visit) never fires a "new" announcement;
+  // only a genuine transition observed while this page is open does. The
+  // resolved-with-no-response prompt above is the one exception that IS
+  // persisted/re-announced across visits — it's meant to keep nagging
+  // until answered, unlike a plain status FYI.
+  const lastAnnouncedStatus = useRef<Record<number, string>>({});
   // One per webview visit — analytics-only (see ChatSession on the backend),
   // never used for anything the astrologer-facing flows depend on.
   const [sessionId, setSessionId] = useState(() => persisted?.sessionId ?? crypto.randomUUID());
@@ -128,29 +143,67 @@ export function ChatPage() {
     return () => clearInterval(interval);
   }, [messages.length, chatClosed]);
 
-  // Proactively announce a ticket the moment it's resolved (admin side),
-  // instead of leaving the astrologer to notice a passive banner — this is
-  // how "did we ask satisfied/unsatisfied?" actually gets asked.
+  // Proactively surface every ticket status change (admin side) in the
+  // chat itself, instead of leaving the astrologer to notice a passive
+  // banner. "Resolved" is the one status that gets the interactive
+  // satisfied/not-satisfied prompt (see ticketSatisfactionPrompt) — it's
+  // the only status where "are you satisfied with this?" is a meaningful
+  // question. Every other transition (including the 48h auto-close) gets
+  // a plain FYI message with whatever comment the KAM/CS left.
   useEffect(() => {
     if (!tickets) return;
     for (const ticket of tickets) {
+      const latestNote = ticket.history[ticket.history.length - 1]?.note;
+
       if (
         ticket.status === "resolved" &&
         !ticket.satisfaction &&
         !announcedResolvedTicketIds.current.has(ticket.id)
       ) {
         announcedResolvedTicketIds.current.add(ticket.id);
+        lastAnnouncedStatus.current[ticket.id] = ticket.status;
         setMessages((prev) => [
           ...prev,
           {
             id: makeId(),
             role: "assistant",
-            text: `Good news — Ticket #${ticket.id} has been marked resolved by our team! Did this fix your issue?`,
+            text: `Good news — regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id} is marked **Resolved** by our team.${latestNote ? ` **${latestNote}**` : ""} Did this fix your issue?`,
             status: "sent",
             ticketSatisfactionPrompt: ticket.id,
           },
         ]);
+        continue;
       }
+
+      const previousStatus = lastAnnouncedStatus.current[ticket.id];
+      lastAnnouncedStatus.current[ticket.id] = ticket.status;
+      // Not resolved (anymore) — a stale Satisfied/Not-satisfied prompt
+      // from before (e.g. the ticket auto-closed while unanswered) would
+      // 400 if clicked now (record_satisfaction requires status===resolved
+      // server-side), so clear it rather than leave a dead button.
+      if (ticket.status !== "resolved") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.ticketSatisfactionPrompt === ticket.id ? { ...m, ticketSatisfactionPrompt: undefined } : m,
+          ),
+        );
+      }
+      if (previousStatus === undefined || previousStatus === ticket.status) continue;
+      // Closed via the astrologer's own "Satisfied" click seconds ago —
+      // they already told us themselves; a generic FYI right after that
+      // is pure noise, not new information (confirmed live: this read as
+      // a confusing near-duplicate of their own action).
+      if (ticket.status === "closed" && ticket.satisfaction === "satisfied") continue;
+
+      const intro = `Regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id}`;
+      const text =
+        ticket.status === "closed" && ticket.satisfaction === null
+          ? `${intro} was automatically marked **Closed** after 48 hours with no response. Still an issue? Just tell me and I'll reopen it.`
+          : `${intro} is marked **${STATUS_LABELS[ticket.status]}** by our team.${latestNote ? ` **${latestNote}**` : ""}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId(), role: "assistant", text, status: "sent", isTicketStatusUpdate: true },
+      ]);
     }
   }, [tickets]);
 
@@ -160,7 +213,16 @@ export function ChatPage() {
     );
     submitSatisfaction.mutate(
       { id: ticketId, satisfied },
-      { onSuccess: () => { if (!satisfied) handleUnsatisfied(); } },
+      {
+        onSuccess: () => {
+          if (satisfied) return;
+          // Pre-seed so the ticket-watcher effect's next poll doesn't
+          // re-announce this exact transition as a generic FYI —
+          // handleUnsatisfied already says it, right here, immediately.
+          lastAnnouncedStatus.current[ticketId] = "under_review";
+          handleUnsatisfied();
+        },
+      },
     );
   }
 

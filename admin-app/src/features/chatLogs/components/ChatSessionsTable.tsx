@@ -1,5 +1,5 @@
 import type { ChatSessionSummary } from "@astrohelp/shared";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 function PriorityBadge({ priority }: { priority: number | null }) {
   if (priority === null) return <span className="text-xs text-night/30">—</span>;
@@ -49,6 +49,7 @@ export function ChatSessionsTable({ sessions }: { sessions: ChatSessionSummary[]
             <th className="px-4 py-3 font-medium">Priority</th>
             <th className="px-4 py-3 font-medium">Issue</th>
             <th className="px-4 py-3 font-medium">Status</th>
+            <th className="px-4 py-3 font-medium">Ticket</th>
             <th className="px-4 py-3 font-medium">Started</th>
           </tr>
         </thead>
@@ -79,6 +80,19 @@ export function ChatSessionsTable({ sessions }: { sessions: ChatSessionSummary[]
               </td>
               <td className="px-4 py-3">
                 <ResolutionBadge resolvedBy={session.resolved_by} />
+              </td>
+              <td className="px-4 py-3">
+                {session.ticket_id ? (
+                  <Link
+                    to={`/tickets/${session.ticket_id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-medium text-terracotta hover:underline"
+                  >
+                    #{session.ticket_id}
+                  </Link>
+                ) : (
+                  <span className="text-xs text-night/30">—</span>
+                )}
               </td>
               <td className="px-4 py-3 text-xs text-night/50">
                 {new Date(session.started_at).toLocaleString(undefined, {

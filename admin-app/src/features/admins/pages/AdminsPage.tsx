@@ -146,7 +146,12 @@ function AdminsTable({
         </thead>
         <tbody>
           {admins.map((admin) => (
-            <tr key={admin.id} className="border-b border-night/5 last:border-0">
+            <tr
+              key={admin.id}
+              className={`border-b border-night/5 last:border-0 ${
+                admin.is_active && admin.is_temporarily_inactive ? "bg-ochre-100/40" : ""
+              }`}
+            >
               <td className="px-4 py-3 font-medium text-night">{admin.name}</td>
               <td className="px-4 py-3 text-night/70">{admin.email}</td>
               <td className="px-4 py-3">
@@ -205,21 +210,42 @@ function AdminsTable({
               <td className="px-4 py-3">
                 <span
                   className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                    admin.is_active ? "bg-moss/15 text-moss" : "bg-night/10 text-night/50"
+                    !admin.is_active
+                      ? "bg-night/10 text-night/50"
+                      : admin.is_temporarily_inactive
+                        ? "bg-ochre/15 text-ochre-700"
+                        : "bg-moss/15 text-moss"
                   }`}
                 >
-                  {admin.is_active ? "Active" : "Inactive"}
+                  {!admin.is_active ? "Inactive" : admin.is_temporarily_inactive ? "On leave" : "Active"}
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  disabled={updateAdmin.isPending}
-                  onClick={() => updateAdmin.mutate({ id: admin.id, is_active: !admin.is_active })}
-                  className="text-sm font-medium text-terracotta hover:underline disabled:opacity-50"
-                >
-                  {admin.is_active ? "Deactivate" : "Reactivate"}
-                </button>
+                <div className="flex justify-end gap-3">
+                  {admin.is_active && (
+                    <button
+                      type="button"
+                      disabled={updateAdmin.isPending}
+                      onClick={() =>
+                        updateAdmin.mutate({
+                          id: admin.id,
+                          is_temporarily_inactive: !admin.is_temporarily_inactive,
+                        })
+                      }
+                      className="text-sm font-medium text-ochre-700 hover:underline disabled:opacity-50"
+                    >
+                      {admin.is_temporarily_inactive ? "Mark back" : "Mark on leave"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={updateAdmin.isPending}
+                    onClick={() => updateAdmin.mutate({ id: admin.id, is_active: !admin.is_active })}
+                    className="text-sm font-medium text-terracotta hover:underline disabled:opacity-50"
+                  >
+                    {admin.is_active ? "Deactivate" : "Reactivate"}
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -260,7 +286,10 @@ export function AdminsPage() {
           page — Normal-access accounts log in with{" "}
           <span className="font-medium text-night/70">astroHelp@123</span>, admin-access accounts with{" "}
           <span className="font-medium text-night/70">astroHelpAdmin@123</span>. Deactivate a profile
-          here instead of deleting it to keep its ticket history intact. Set a Slack user ID (from
+          here instead of deleting it to keep its ticket history intact. Use "Mark on leave" for a
+          short, reversible break instead — their existing tickets keep showing normally everywhere
+          (unlike full deactivation), they're just skipped for new round-robin assignment until
+          marked back. Set a Slack user ID (from
           that person's Slack profile → "..." → Copy member ID) to have ticket notifications actually
           @mention and notify them — without it, their name still shows in the message, but Slack
           never pings them.

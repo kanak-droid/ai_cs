@@ -39,6 +39,7 @@ export function useUpdateAdmin() {
       access_level?: AdminAccessLevel;
       languages?: string[];
       is_active?: boolean;
+      is_temporarily_inactive?: boolean;
       slack_user_id?: string;
     }) => api.patch<Admin>(`/api/admin/admins/${id}`, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: adminsKey }),

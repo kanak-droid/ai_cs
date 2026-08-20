@@ -21,6 +21,7 @@ export function KamPerformanceTable({ rows }: { rows: KamPerformance[] }) {
             <th className="px-4 py-3 font-medium">Pending</th>
             <th className="px-4 py-3 font-medium">Assigned</th>
             <th className="px-4 py-3 font-medium">Solved</th>
+            <th className="px-4 py-3 font-medium">Escalated</th>
             <th className="px-4 py-3 font-medium">Avg. TAT</th>
           </tr>
         </thead>
@@ -32,6 +33,12 @@ export function KamPerformanceTable({ rows }: { rows: KamPerformance[] }) {
               <td className="px-4 py-3 text-night">{row.pending_count}</td>
               <td className="px-4 py-3 text-night">{row.assigned_count}</td>
               <td className="px-4 py-3 text-night">{row.solved_count}</td>
+              {/* Only meaningful for CS rows — a KAM resolving an escalated
+                  ticket is credited as "solved", not "escalated" (see
+                  analytics_service._get_kam_performance). */}
+              <td className="px-4 py-3 text-night">
+                {row.role === "cs" ? row.escalated_to_kam_count : "—"}
+              </td>
               <td className="px-4 py-3 text-night">{formatTat(row.avg_tat_hours)}</td>
             </tr>
           ))}

@@ -1,7 +1,10 @@
 import type { AdminTicket } from "@astrohelp/shared";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { Modal } from "../../../components/Modal";
 import { useAdminsLookup } from "../api/useAdminsLookup";
+import { ReassignTicketForm } from "./ReassignTicketForm";
 import { TicketStatusBadge } from "./TicketStatusBadge";
 
 function PriorityBadge({ priority }: { priority: number | null }) {
@@ -21,23 +24,25 @@ function PriorityBadge({ priority }: { priority: number | null }) {
 function AssignedToCell({
   assignedAdminId,
   assignedCsId,
+  onReassignClick,
 }: {
   assignedAdminId: number | null;
   assignedCsId: number | null;
+  onReassignClick: () => void;
 }) {
   const { data: admins } = useAdminsLookup();
   const kam = admins?.find((a) => a.id === assignedAdminId);
   const cs = admins?.find((a) => a.id === assignedCsId);
 
-  if (!kam && !cs) return <span className="text-xs text-night/30">—</span>;
-
   return (
     <div className="flex flex-col gap-0.5 text-xs">
-      {kam && (
+      {kam ? (
         <span className="text-night">
           <span className="text-night/40">KAM </span>
           {kam.name}
         </span>
+      ) : (
+        !cs && <span className="text-night/30">—</span>
       )}
       {cs && (
         <span className="text-night">
@@ -45,12 +50,26 @@ function AssignedToCell({
           {cs.name}
         </span>
       )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onReassignClick();
+        }}
+        className="mt-0.5 text-left font-medium text-terracotta hover:underline"
+      >
+        Reassign
+      </button>
     </div>
   );
 }
 
 export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
   const navigate = useNavigate();
+  // Tracks which ticket's reassign modal is open — a single piece of state
+  // on the table rather than per-row, since only one modal can ever be
+  // open at a time.
+  const [reassigningTicketId, setReassigningTicketId] = useState<number | null>(null);
 
   return (
     <div className="overflow-x-auto rounded-2xl bg-white shadow-sm">
@@ -93,10 +112,18 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
                 <AssignedToCell
                   assignedAdminId={ticket.assigned_admin_id}
                   assignedCsId={ticket.assigned_cs_id}
+                  onReassignClick={() => setReassigningTicketId(ticket.id)}
                 />
               </td>
               <td className="px-4 py-3">
-                <TicketStatusBadge status={ticket.status} />
+                <div className="flex flex-col gap-1">
+                  <TicketStatusBadge status={ticket.status} />
+                  {ticket.escalated_to_kam && (
+                    <span className="inline-flex w-fit items-center rounded-full bg-ochre/15 px-2.5 py-1 text-xs font-medium text-ochre-700">
+                      Escalated to KAM
+                    </span>
+                  )}
+                </div>
               </td>
               <td className="px-4 py-3 text-xs text-night/50">
                 {new Date(ticket.created_at).toLocaleDateString(undefined, {
@@ -109,6 +136,16 @@ export function TicketQueueTable({ tickets }: { tickets: AdminTicket[] }) {
           ))}
         </tbody>
       </table>
+
+      {reassigningTicketId !== null && (
+        <Modal title={`Reassign ticket #${reassigningTicketId}`} onClose={() => setReassigningTicketId(null)}>
+          <ReassignTicketForm
+            ticketId={reassigningTicketId}
+            onDone={() => setReassigningTicketId(null)}
+            onCancel={() => setReassigningTicketId(null)}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

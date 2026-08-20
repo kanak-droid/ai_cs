@@ -23,12 +23,10 @@ export const STATUS_COLOR_TOKEN: Record<TicketStatus, string> = {
 
 // Statuses an admin may set manually from the dashboard. submitted and
 // assigned_to_kam only ever happen automatically on ticket creation.
-export const ADMIN_SETTABLE_STATUSES: TicketStatus[] = [
-  "under_review",
-  "in_progress",
-  "resolved",
-  "closed",
-];
+// "closed" is deliberately excluded (2026-08-20): the only manual terminal
+// state is "resolved" — closing now always comes from the astrologer
+// confirming it's fixed, or the 48h auto-close if they never respond.
+export const ADMIN_SETTABLE_STATUSES: TicketStatus[] = ["under_review", "in_progress", "resolved"];
 
 export interface TimelineStep {
   key: string;
