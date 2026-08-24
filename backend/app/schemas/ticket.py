@@ -60,6 +60,23 @@ class TicketReassignRequest(BaseModel):
     note: str | None = None
 
 
+class TicketBulkReassignRequest(BaseModel):
+    ticket_ids: list[int]
+    role: str  # "kam" | "cs"
+    admin_id: int
+    note: str | None = None
+
+
+class TicketBulkReassignResult(BaseModel):
+    ticket_id: int
+    ok: bool
+    error: str | None = None
+
+
+class TicketBulkReassignResponse(BaseModel):
+    results: list[TicketBulkReassignResult]
+
+
 class TicketEscalateRequest(BaseModel):
     # Mandatory — a CS escalating to a KAM must explain why (see
     # ticket_service.escalate_to_kam).

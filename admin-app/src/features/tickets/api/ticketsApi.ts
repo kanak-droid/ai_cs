@@ -1,4 +1,4 @@
-import type { AdminTicket, TicketStatus } from "@astrohelp/shared";
+import type { AdminTicket, BulkReassignResult, TicketStatus } from "@astrohelp/shared";
 
 import { api } from "../../../lib/apiClient";
 import type { TicketQueueFilters } from "./queryKeys";
@@ -40,4 +40,18 @@ export function reassignTicket(
 
 export function escalateTicket(id: number, note: string): Promise<AdminTicket> {
   return api.post<AdminTicket>(`/api/admin/tickets/${id}/escalate`, { note });
+}
+
+export function bulkReassignTickets(
+  ticketIds: number[],
+  role: "kam" | "cs",
+  adminId: number,
+  note?: string,
+): Promise<{ results: BulkReassignResult[] }> {
+  return api.post(`/api/admin/tickets/bulk-reassign`, {
+    ticket_ids: ticketIds,
+    role,
+    admin_id: adminId,
+    note,
+  });
 }

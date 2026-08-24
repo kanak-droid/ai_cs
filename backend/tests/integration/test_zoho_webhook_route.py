@@ -137,17 +137,86 @@ def test_webhook_replaying_escalated_does_not_duplicate(client, db_session, seed
     assert len(escalation_entries) == 1
 
 
-def test_webhook_open_and_on_hold_are_no_ops(client, db_session, seeded_astrologer, monkeypatch):
+def test_webhook_open_is_a_no_op(client, db_session, seeded_astrologer, monkeypatch):
     ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
     original_status = ticket.status
 
-    for zoho_status in ("Open", "On Hold"):
+    response = client.post(
+        "/api/integrations/zoho/webhook",
+        headers={"X-Zoho-Webhook-Secret": _SECRET},
+        json={"ticket_id": ticket.zoho_ticket_id, "status": "Open"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(ticket)
+    assert ticket.status == original_status
+
+
+def test_webhook_on_hold_transitions_to_in_progress_with_the_note(
+    client, db_session, seeded_astrologer, monkeypatch
+):
+    ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
+
+    response = client.post(
+        "/api/integrations/zoho/webhook",
+        headers={"X-Zoho-Webhook-Secret": _SECRET},
+        json={"ticket_id": ticket.zoho_ticket_id, "status": "On Hold", "note": "Waiting on the payments team"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(ticket)
+    assert ticket.status == TicketStatus.IN_PROGRESS
+    assert ticket.history[-1].note == "Waiting on the payments team"
+
+
+def test_webhook_on_hold_works_without_a_note(client, db_session, seeded_astrologer, monkeypatch):
+    ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
+
+    response = client.post(
+        "/api/integrations/zoho/webhook",
+        headers={"X-Zoho-Webhook-Secret": _SECRET},
+        json={"ticket_id": ticket.zoho_ticket_id, "status": "On Hold"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(ticket)
+    assert ticket.status == TicketStatus.IN_PROGRESS
+    assert ticket.history[-1].note is None
+
+
+def test_webhook_on_hold_can_fire_repeatedly_with_different_notes(
+    client, db_session, seeded_astrologer, monkeypatch
+):
+    ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
+
+    for note in ("First update", "Second update"):
         response = client.post(
             "/api/integrations/zoho/webhook",
             headers={"X-Zoho-Webhook-Secret": _SECRET},
-            json={"ticket_id": ticket.zoho_ticket_id, "status": zoho_status},
+            json={"ticket_id": ticket.zoho_ticket_id, "status": "On Hold", "note": note},
         )
         assert response.status_code == 200
 
     db_session.refresh(ticket)
-    assert ticket.status == original_status
+    assert ticket.status == TicketStatus.IN_PROGRESS
+    in_progress_notes = [h.note for h in ticket.history if h.status == TicketStatus.IN_PROGRESS]
+    assert in_progress_notes == ["First update", "Second update"]
+
+
+def test_webhook_on_hold_does_nothing_once_a_ticket_is_terminal(
+    client, db_session, seeded_astrologer, monkeypatch
+):
+    ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+
+    response = client.post(
+        "/api/integrations/zoho/webhook",
+        headers={"X-Zoho-Webhook-Secret": _SECRET},
+        json={"ticket_id": ticket.zoho_ticket_id, "status": "On Hold", "note": "too late"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(ticket)
+    assert ticket.status == TicketStatus.RESOLVED

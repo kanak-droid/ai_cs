@@ -16,6 +16,7 @@ from app.integrations.config import MOCK_MODE
 from app.integrations.language_matching import split_languages
 from app.models.admin import Admin
 from app.models.enums import AdminRole
+from app.services import admin_service
 
 
 @dataclass(frozen=True)
@@ -29,16 +30,17 @@ def get_assigned_cs(db: Session, *, ticket_id: int, astrologer_language: str) ->
         raise NotImplementedError("Real CS-assignment integration is not wired up yet.")
 
     # is_temporarily_inactive excluded same as permanent deactivation for NEW
-    # assignment purposes — see admin_mapping_client.fetch_active_kams.
-    cs_admins = list(
+    # assignment purposes — see admin_mapping_client.fetch_active_kams,
+    # including why the filter is applied in Python (after the lazy
+    # scheduled-leave revert), not in this SQL query.
+    candidates = list(
         db.scalars(
-            select(Admin).where(
-                Admin.is_active,
-                Admin.is_temporarily_inactive.is_(False),
-                Admin.role == AdminRole.CS,
-            )
+            select(Admin).where(Admin.is_active, Admin.role == AdminRole.CS)
         ).all()
     )
+    for a in candidates:
+        admin_service.maybe_end_scheduled_leave(db, a)
+    cs_admins = [a for a in candidates if not a.is_temporarily_inactive]
     if not cs_admins:
         return None
 

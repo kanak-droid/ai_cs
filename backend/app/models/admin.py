@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum, String
@@ -54,6 +54,15 @@ class Admin(Base):
     # gates NEW round-robin assignment (admin_mapping_client/
     # cs_assignment_client) — never touches existing ticket assignments.
     is_temporarily_inactive: Mapped[bool] = mapped_column(default=False)
+    # Optional auto-revert date for the leave above — set together with
+    # is_temporarily_inactive=True when the return date is already known, so
+    # nobody has to remember to click "Mark back" manually. Always cleared
+    # whenever is_temporarily_inactive turns off, manual or automatic (see
+    # admin_service.maybe_end_scheduled_leave for the lazy, on-read revert —
+    # same not-dependent-on-a-scheduler convention as
+    # ticket_service._maybe_auto_close_stale). Null means indefinite leave,
+    # same as today's manual-only behavior.
+    leave_until: Mapped[date | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     astrologers: Mapped[list["Astrologer"]] = relationship(back_populates="assigned_admin")

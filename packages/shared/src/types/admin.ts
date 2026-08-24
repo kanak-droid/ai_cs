@@ -22,6 +22,9 @@ export interface Admin {
   // keep showing everywhere an active admin does; only excluded from NEW
   // ticket round-robin. See backend Admin model's docstring.
   is_temporarily_inactive: boolean;
+  // Optional auto-revert date (YYYY-MM-DD) for the leave above — null means
+  // indefinite (manual "Mark back" only), same as before this field existed.
+  leave_until: string | null;
 }
 
 export interface AdminTicket extends Ticket {
@@ -94,6 +97,12 @@ export interface AnalyticsOverview {
   kam_performance: KamPerformance[];
   weekly_ticket_trend: TicketPeriodCount[];
   monthly_ticket_trend: TicketPeriodCount[];
+}
+
+export interface BulkReassignResult {
+  ticket_id: number;
+  ok: boolean;
+  error: string | null;
 }
 
 export interface TicketRatingEntry {

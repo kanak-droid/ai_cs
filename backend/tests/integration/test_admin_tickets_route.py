@@ -259,3 +259,112 @@ def test_update_status_route_accepts_resolve_with_a_comment(
 
     assert response.status_code == 200
     assert response.json()["status"] == "resolved"
+
+
+def _make_ticket(db_session, seeded_astrologer):
+    return ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+
+def test_bulk_reassign_route_moves_ownership_of_every_ticket(
+    client, db_session, seeded_astrologer, admin_access_auth_header
+):
+    other_kam = Admin(name="Bulk Target KAM", email="bulktarget@test.example", role=AdminRole.KAM)
+    db_session.add(other_kam)
+    db_session.commit()
+    tickets = [_make_ticket(db_session, seeded_astrologer) for _ in range(3)]
+
+    response = client.post(
+        "/api/admin/tickets/bulk-reassign",
+        headers=admin_access_auth_header,
+        json={
+            "ticket_ids": [t.id for t in tickets],
+            "role": "kam",
+            "admin_id": other_kam.id,
+            "note": "Covering for a departing KAM",
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert all(r["ok"] for r in results)
+    assert {r["ticket_id"] for r in results} == {t.id for t in tickets}
+    for t in tickets:
+        db_session.refresh(t)
+        assert t.assigned_admin_id == other_kam.id
+
+
+def test_bulk_reassign_route_requires_admin_access(
+    client, db_session, seeded_astrologer, admin_auth_header
+):
+    other_kam = Admin(name="Bulk Target KAM 2", email="bulktarget2@test.example", role=AdminRole.KAM)
+    db_session.add(other_kam)
+    db_session.commit()
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    response = client.post(
+        "/api/admin/tickets/bulk-reassign",
+        headers=admin_auth_header,
+        json={"ticket_ids": [ticket.id], "role": "kam", "admin_id": other_kam.id},
+    )
+
+    assert response.status_code == 403
+
+
+def test_bulk_reassign_route_reports_a_failure_per_ticket_without_failing_the_whole_batch(
+    client, db_session, seeded_astrologer, admin_access_auth_header
+):
+    other_kam = Admin(name="Bulk Target KAM 3", email="bulktarget3@test.example", role=AdminRole.KAM)
+    db_session.add(other_kam)
+    db_session.commit()
+    good_ticket = _make_ticket(db_session, seeded_astrologer)
+    missing_ticket_id = good_ticket.id + 999999
+
+    response = client.post(
+        "/api/admin/tickets/bulk-reassign",
+        headers=admin_access_auth_header,
+        json={
+            "ticket_ids": [good_ticket.id, missing_ticket_id],
+            "role": "kam",
+            "admin_id": other_kam.id,
+        },
+    )
+
+    assert response.status_code == 200
+    results = {r["ticket_id"]: r for r in response.json()["results"]}
+    assert results[good_ticket.id]["ok"] is True
+    assert results[missing_ticket_id]["ok"] is False
+    assert results[missing_ticket_id]["error"] is not None
+    db_session.refresh(good_ticket)
+    assert good_ticket.assigned_admin_id == other_kam.id
+
+
+def test_bulk_reassign_route_rejects_an_admin_on_leave(
+    client, db_session, seeded_astrologer, admin_access_auth_header
+):
+    on_leave_kam = Admin(
+        name="Bulk On Leave KAM",
+        email="bulkonleave@test.example",
+        role=AdminRole.KAM,
+        is_temporarily_inactive=True,
+    )
+    db_session.add(on_leave_kam)
+    db_session.commit()
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    response = client.post(
+        "/api/admin/tickets/bulk-reassign",
+        headers=admin_access_auth_header,
+        json={"ticket_ids": [ticket.id], "role": "kam", "admin_id": on_leave_kam.id},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0]["ok"] is False

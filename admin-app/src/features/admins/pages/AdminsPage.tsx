@@ -14,6 +14,94 @@ function parseLanguages(input: string): string[] {
     .filter(Boolean);
 }
 
+function formatLeaveUntil(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// Own component (not inlined in the table) so each row can hold its own
+// "picking a return date" state via useState — not possible from inside a
+// plain .map() callback.
+function MarkOnLeaveControl({
+  admin,
+  updateAdmin,
+}: {
+  admin: Admin;
+  updateAdmin: ReturnType<typeof useUpdateAdmin>;
+}) {
+  const [pickingDate, setPickingDate] = useState(false);
+  const [untilDate, setUntilDate] = useState("");
+
+  if (admin.is_temporarily_inactive) {
+    return (
+      <button
+        type="button"
+        disabled={updateAdmin.isPending}
+        onClick={() =>
+          updateAdmin.mutate({ id: admin.id, is_temporarily_inactive: false, leave_until: null })
+        }
+        className="text-sm font-medium text-ochre-700 hover:underline disabled:opacity-50"
+      >
+        Mark back
+      </button>
+    );
+  }
+
+  if (!pickingDate) {
+    return (
+      <button
+        type="button"
+        disabled={updateAdmin.isPending}
+        onClick={() => setPickingDate(true)}
+        className="text-sm font-medium text-ochre-700 hover:underline disabled:opacity-50"
+      >
+        Mark on leave
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="date"
+        value={untilDate}
+        onChange={(e) => setUntilDate(e.target.value)}
+        title="Return date (optional) — leave blank to mark back manually"
+        className="rounded-lg border border-night/15 px-1.5 py-1 text-xs text-ink"
+      />
+      <button
+        type="button"
+        disabled={updateAdmin.isPending}
+        onClick={() => {
+          updateAdmin.mutate({
+            id: admin.id,
+            is_temporarily_inactive: true,
+            leave_until: untilDate || null,
+          });
+          setPickingDate(false);
+          setUntilDate("");
+        }}
+        className="text-xs font-medium text-ochre-700 hover:underline disabled:opacity-50"
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setPickingDate(false);
+          setUntilDate("");
+        }}
+        className="text-xs font-medium text-night/40 hover:underline"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function AddAccessForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -217,26 +305,18 @@ function AdminsTable({
                         : "bg-moss/15 text-moss"
                   }`}
                 >
-                  {!admin.is_active ? "Inactive" : admin.is_temporarily_inactive ? "On leave" : "Active"}
+                  {!admin.is_active
+                    ? "Inactive"
+                    : admin.is_temporarily_inactive
+                      ? admin.leave_until
+                        ? `On leave until ${formatLeaveUntil(admin.leave_until)}`
+                        : "On leave"
+                      : "Active"}
                 </span>
               </td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-3">
-                  {admin.is_active && (
-                    <button
-                      type="button"
-                      disabled={updateAdmin.isPending}
-                      onClick={() =>
-                        updateAdmin.mutate({
-                          id: admin.id,
-                          is_temporarily_inactive: !admin.is_temporarily_inactive,
-                        })
-                      }
-                      className="text-sm font-medium text-ochre-700 hover:underline disabled:opacity-50"
-                    >
-                      {admin.is_temporarily_inactive ? "Mark back" : "Mark on leave"}
-                    </button>
-                  )}
+                  {admin.is_active && <MarkOnLeaveControl admin={admin} updateAdmin={updateAdmin} />}
                   <button
                     type="button"
                     disabled={updateAdmin.isPending}

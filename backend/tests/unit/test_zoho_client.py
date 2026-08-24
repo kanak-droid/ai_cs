@@ -4,7 +4,8 @@ import pytest
 from app.core.config import settings
 from app.integrations import object_storage, queue_performance_client, zoho_client
 from app.integrations.queue_performance_client import QueuePerformance
-from app.models.enums import TicketStatus
+from app.models.admin import Admin
+from app.models.enums import AdminRole, TicketStatus
 from app.services import ticket_service
 
 
@@ -75,6 +76,62 @@ def test_zoho_status_for_escalated_overrides_underlying_status():
         status = TicketStatus.IN_PROGRESS
 
     assert zoho_client.zoho_status_for(_FakeTicket()) == "Escalated"
+
+
+def test_zoho_category_for_maps_known_categories():
+    assert zoho_client._zoho_category_for("payout") == "Payment Queries"
+    assert zoho_client._zoho_category_for("kyc") == "Withdrawal / KYC"
+    assert zoho_client._zoho_category_for("no_visibility") == "Low Visibility"
+
+
+def test_zoho_category_for_falls_back_for_unknown_category():
+    assert zoho_client._zoho_category_for("something_new") == "User Queries"
+
+
+def test_zoho_sub_issue_for_matches_keywords_case_insensitively():
+    assert zoho_client._zoho_sub_issue_for("Payout_Delay") == "Withdrawal Amount not Received"
+    assert zoho_client._zoho_sub_issue_for("app_crash") == "Tech Issues"
+    assert zoho_client._zoho_sub_issue_for("low_calls") == "Low Visibility"
+
+
+def test_zoho_sub_issue_for_falls_back_to_general_inquiry():
+    assert zoho_client._zoho_sub_issue_for("something_unrelated") == "General Inquiry"
+    assert zoho_client._zoho_sub_issue_for(None) == "General Inquiry"
+
+
+def test_zoho_language_for_uses_the_assigned_cs_language(db_session, seeded_astrologer):
+    cs = Admin(name="Tamil CS", email="tamil-cs@test.example", role=AdminRole.CS, languages=["Tamil"])
+    db_session.add(cs)
+    db_session.commit()
+    ticket = _make_ticket(db_session, seeded_astrologer)
+    ticket.assigned_cs_id = cs.id
+    db_session.commit()
+    db_session.refresh(ticket)
+
+    assert zoho_client._zoho_language_for(ticket) == "Tamil"
+
+
+def test_zoho_language_for_falls_back_when_cs_language_not_in_zoho_list(db_session, seeded_astrologer):
+    cs = Admin(
+        name="English CS", email="english-cs@test.example", role=AdminRole.CS, languages=["English"]
+    )
+    db_session.add(cs)
+    db_session.commit()
+    ticket = _make_ticket(db_session, seeded_astrologer)
+    ticket.assigned_cs_id = cs.id
+    db_session.commit()
+    db_session.refresh(ticket)
+
+    assert zoho_client._zoho_language_for(ticket) == "Hindi"
+
+
+def test_zoho_language_for_falls_back_with_no_assigned_cs(db_session, seeded_astrologer):
+    ticket = _make_ticket(db_session, seeded_astrologer)
+    ticket.assigned_cs_id = None
+    db_session.commit()
+    db_session.refresh(ticket)
+
+    assert zoho_client._zoho_language_for(ticket) == "Hindi"
 
 
 def test_mock_mode_never_calls_httpx(db_session, seeded_astrologer, monkeypatch):
@@ -152,6 +209,34 @@ def test_find_agent_id_by_email_failure_is_caught_not_raised(monkeypatch):
     monkeypatch.setattr(zoho_client, "_get_agents", _boom)
 
     assert zoho_client.find_agent_id_by_email("saritha.b@getlokalapp.com") is None
+
+
+def test_create_ticket_includes_the_required_layout_fields(db_session, seeded_astrologer, monkeypatch):
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+    monkeypatch.setattr(zoho_client, "find_agent_id_by_email", lambda email: None)
+
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return _FakeResponse({"id": "zoho-1"})
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    zoho_client.create_ticket(db_session, ticket)
+
+    payload = captured["json"]
+    assert payload["category"] == "User Queries"  # ticket's category is "other"
+    assert payload["language"] == "Hindi"  # no assigned CS in this test -> fallback
+    assert payload["cf"] == {
+        "cf_user_type": "Astrologer",
+        "cf_sub_status": "RNR 1",
+        "cf_sub_issue": "General Inquiry",  # sub_category is "general" -> no keyword match
+        "cf_comments": "Raised via AstroHelp chatbot",
+    }
 
 
 def test_create_ticket_includes_assignee_when_an_agent_matches(db_session, seeded_astrologer, monkeypatch):

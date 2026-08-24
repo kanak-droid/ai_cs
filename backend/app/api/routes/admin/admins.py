@@ -7,7 +7,7 @@ from app.core.errors import NotFoundError
 from app.core.security import AdminContext, hash_password
 from app.models.admin import Admin
 from app.schemas.admin import AdminCreateRequest, AdminRead, AdminUpdateRequest
-from app.services import auth_service
+from app.services import admin_service, auth_service
 
 router = APIRouter(tags=["admin"])
 
@@ -30,6 +30,8 @@ def list_admins(
     if not include_inactive:
         stmt = stmt.where(Admin.is_active.is_(True))
     admins = db.scalars(stmt).all()
+    for a in admins:
+        admin_service.maybe_end_scheduled_leave(db, a)
     return [AdminRead.model_validate(a) for a in admins]
 
 
@@ -89,6 +91,11 @@ def update_admin(
         target.is_active = body.is_active
     if body.is_temporarily_inactive is not None:
         target.is_temporarily_inactive = body.is_temporarily_inactive
+        # Always set together with the flag itself (the admin-app sends both
+        # in the same request every time it toggles this) — an indefinite
+        # leave or a manual "Mark back" both mean leave_until should be
+        # cleared, and a fresh "Mark on leave" replaces whatever was there.
+        target.leave_until = body.leave_until
     if body.slack_user_id is not None:
         target.slack_user_id = body.slack_user_id
 

@@ -198,6 +198,19 @@ def _maybe_push_to_zoho(db: Session, ticket: Ticket) -> None:
             logger.exception("Zoho Desk attachment upload raised unexpectedly for ticket #%s", ticket.id)
 
 
+def backfill_push_to_zoho(db: Session, ticket: Ticket) -> bool:
+    """Public entry point for scripts/backfill_zoho_tickets.py — a ticket
+    created before the Zoho sync existed never went through create_ticket
+    or reassign_ticket, so it needs an explicit one-time push. Same guard
+    and logic as _maybe_push_to_zoho, exposed here so the one-off script
+    doesn't reach into a private function. Returns whether the push
+    actually left the ticket with a zoho_ticket_id, so the caller can
+    report a real pushed/failed count instead of assuming success.
+    """
+    _maybe_push_to_zoho(db, ticket)
+    return ticket.zoho_ticket_id is not None
+
+
 def sync_chat_transcript_to_zoho(db: Session, ticket: Ticket, session_id: str | None) -> None:
     """Posts the astrologer's full chat transcript (see
     chat_session_service.get_transcript_text) as a Zoho ticket comment —

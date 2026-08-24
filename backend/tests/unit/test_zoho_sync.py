@@ -374,3 +374,66 @@ def test_a_zoho_transcript_post_failure_never_raises(db_session, seeded_astrolog
 
     # Must not raise.
     ticket_service.sync_chat_transcript_to_zoho(db_session, ticket, "sess-zoho-3")
+
+
+def test_backfill_push_to_zoho_pushes_a_ticket_that_predates_the_sync(db_session, seeded_astrologer):
+    # Simulates a real pre-existing production ticket: created normally,
+    # then its zoho_ticket_id forced back to None — exactly what every row
+    # from before this feature existed looks like after the migration.
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket.zoho_ticket_id = None
+    db_session.commit()
+
+    pushed = ticket_service.backfill_push_to_zoho(db_session, ticket)
+
+    assert pushed is True
+    assert ticket.zoho_ticket_id is not None
+
+
+def test_backfill_push_to_zoho_returns_false_when_not_cs_notified(db_session, seeded_astrologer):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="profile",
+        sub_category="photo_change",
+        description="new photo",
+        description_en="new photo",
+        preferred_language="English",
+    )
+
+    pushed = ticket_service.backfill_push_to_zoho(db_session, ticket)
+
+    assert pushed is False
+    assert ticket.zoho_ticket_id is None
+
+
+def test_backfill_push_to_zoho_is_a_noop_when_already_pushed(db_session, seeded_astrologer, monkeypatch):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    original_zoho_id = ticket.zoho_ticket_id
+    assert original_zoho_id is not None
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("create_ticket should never be called again for an already-pushed ticket")
+
+    monkeypatch.setattr(zoho_client, "create_ticket", _boom)
+
+    pushed = ticket_service.backfill_push_to_zoho(db_session, ticket)
+
+    assert pushed is True
+    assert ticket.zoho_ticket_id == original_zoho_id

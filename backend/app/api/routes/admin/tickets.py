@@ -5,12 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db, require_admin_access
+from app.core.errors import AppError
 from app.core.security import AdminContext
 from app.integrations import object_storage
 from app.models.enums import TicketStatus
 from app.schemas.admin import AdminTicketRead
 from app.schemas.ticket import (
     AttachmentPreviewResponse,
+    TicketBulkReassignRequest,
+    TicketBulkReassignResponse,
+    TicketBulkReassignResult,
     TicketEscalateRequest,
     TicketReassignRequest,
     TicketStatusUpdateRequest,
@@ -40,6 +44,39 @@ def list_tickets(
     )
     ticket_service.attach_astrologer_priority(db, tickets)
     return [AdminTicketRead.model_validate(t) for t in tickets]
+
+
+@router.post("/api/admin/tickets/bulk-reassign", response_model=TicketBulkReassignResponse)
+def bulk_reassign_tickets(
+    body: TicketBulkReassignRequest,
+    # Same ADMIN-access-level gate as the single-ticket reassign endpoint.
+    admin: AdminContext = Depends(require_admin_access),
+    db: Session = Depends(get_db),
+) -> TicketBulkReassignResponse:
+    """Reassigns many tickets to one target admin in a single request —
+    e.g. moving everything a departing CS was holding. Each ticket is
+    handled independently via the same ticket_service.reassign_ticket used
+    by the single-ticket endpoint (identical eligibility checks and Zoho
+    sync side effects) — one bad id or a role mismatch fails just that row
+    rather than 400ing the whole batch, so a large selection doesn't lose
+    the rows that were valid.
+    """
+    results = []
+    for ticket_id in body.ticket_ids:
+        try:
+            ticket = ticket_service.get_ticket(db, ticket_id)
+            ticket_service.reassign_ticket(
+                db,
+                ticket,
+                role=body.role,
+                new_admin_id=body.admin_id,
+                changed_by=admin.email,
+                note=body.note,
+            )
+            results.append(TicketBulkReassignResult(ticket_id=ticket_id, ok=True))
+        except AppError as e:
+            results.append(TicketBulkReassignResult(ticket_id=ticket_id, ok=False, error=e.message))
+    return TicketBulkReassignResponse(results=results)
 
 
 @router.get("/api/admin/tickets/{ticket_id}", response_model=AdminTicketRead)

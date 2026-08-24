@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
@@ -37,6 +37,7 @@ class AdminRead(BaseModel):
     languages: list[str]
     is_active: bool
     is_temporarily_inactive: bool
+    leave_until: date | None = None
 
 
 class AdminCreateRequest(BaseModel):
@@ -54,6 +55,10 @@ class AdminUpdateRequest(BaseModel):
     languages: list[str] | None = None
     is_active: bool | None = None
     is_temporarily_inactive: bool | None = None
+    # Only applied when is_temporarily_inactive is also set in the same
+    # request (see update_admin) — None here means an indefinite leave, not
+    # "leave unchanged".
+    leave_until: date | None = None
     slack_user_id: str | None = None
 
 

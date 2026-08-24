@@ -86,3 +86,54 @@ def test_an_admin_on_leave_still_appears_in_the_default_active_list(
     assert response.status_code == 200
     ids = [a["id"] for a in response.json()]
     assert seeded_admin.id in ids
+
+
+def test_can_mark_on_leave_with_a_scheduled_return_date(
+    client, admin_access_auth_header, seeded_admin
+):
+    response = client.patch(
+        f"/api/admin/admins/{seeded_admin.id}",
+        headers=admin_access_auth_header,
+        json={"is_temporarily_inactive": True, "leave_until": "2026-09-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_temporarily_inactive"] is True
+    assert body["leave_until"] == "2026-09-01"
+
+
+def test_marking_back_clears_the_scheduled_return_date(
+    client, admin_access_auth_header, seeded_admin
+):
+    client.patch(
+        f"/api/admin/admins/{seeded_admin.id}",
+        headers=admin_access_auth_header,
+        json={"is_temporarily_inactive": True, "leave_until": "2026-09-01"},
+    )
+
+    response = client.patch(
+        f"/api/admin/admins/{seeded_admin.id}",
+        headers=admin_access_auth_header,
+        json={"is_temporarily_inactive": False},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_temporarily_inactive"] is False
+    assert body["leave_until"] is None
+
+
+def test_listing_admins_auto_reverts_an_expired_scheduled_leave(
+    client, admin_access_auth_header, seeded_admin
+):
+    client.patch(
+        f"/api/admin/admins/{seeded_admin.id}",
+        headers=admin_access_auth_header,
+        json={"is_temporarily_inactive": True, "leave_until": "2020-01-01"},
+    )
+
+    response = client.get("/api/admin/admins?include_inactive=true", headers=admin_access_auth_header)
+
+    assert response.status_code == 200
+    body = next(a for a in response.json() if a["id"] == seeded_admin.id)
+    assert body["is_temporarily_inactive"] is False
+    assert body["leave_until"] is None

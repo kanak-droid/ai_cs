@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from app.core.time import utcnow
 from app.integrations import cs_assignment_client
 from app.models.admin import Admin
 from app.models.enums import AdminRole
@@ -77,3 +80,17 @@ def test_ignores_a_cs_admin_on_leave(db_session):
     result = cs_assignment_client.get_assigned_cs(db_session, ticket_id=0, astrologer_language="Hindi")
 
     assert result is None
+
+
+def test_auto_reverts_a_cs_admin_whose_scheduled_leave_has_ended(db_session):
+    back_from_leave = _make_cs(db_session, "BackFromLeaveCS", ["Hindi"])
+    back_from_leave.is_temporarily_inactive = True
+    back_from_leave.leave_until = (utcnow() - timedelta(days=1)).date()
+    db_session.commit()
+
+    result = cs_assignment_client.get_assigned_cs(db_session, ticket_id=0, astrologer_language="Hindi")
+
+    assert result is not None
+    assert result.admin_id == back_from_leave.id
+    assert back_from_leave.is_temporarily_inactive is False
+    assert back_from_leave.leave_until is None

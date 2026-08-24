@@ -36,6 +36,17 @@ def handle_zoho_webhook(
     `closed` is reserved for the astrologer's own confirmation or the 48h
     auto-close, both of which the rating flow depends on; skipping straight
     to it here would silently bypass that.
+
+    "On Hold" maps to `in_progress` — deliberately distinct from "Open"
+    (still a no-op below), since a CS putting a ticket On Hold is a real,
+    intentional action (typically alongside typing an update into a
+    dedicated Zoho field — see body.note) rather than the ticket just
+    sitting untouched. Not guarded against re-firing on the same status
+    (unlike Closed/Escalated) — a CS is expected to do this repeatedly
+    over a ticket's life to send progressive updates, and chat-app's
+    ticket-watcher effect announces every new history row (not just
+    genuine status diffs), so each of these does reach the astrologer in
+    chat with its own note.
     """
     if not settings.ZOHO_WEBHOOK_SECRET or x_zoho_webhook_secret != settings.ZOHO_WEBHOOK_SECRET:
         raise ForbiddenError("Invalid or missing webhook secret")
@@ -61,6 +72,11 @@ def handle_zoho_webhook(
             ticket_service.escalate_to_kam(
                 db, ticket, changed_by="zoho", note=body.note or "Escalated via Zoho Desk"
             )
-    # "Open" / "On Hold" (or anything unrecognized) — no-op.
+    elif body.status == "On Hold":
+        if ticket.status not in _TERMINAL_STATUSES:
+            ticket_service.transition_status(
+                db, ticket, TicketStatus.IN_PROGRESS, changed_by="zoho", note=body.note
+            )
+    # "Open" (or anything unrecognized) — no-op.
 
     return {"status": "ok"}

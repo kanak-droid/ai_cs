@@ -86,13 +86,16 @@ export function ChatPage() {
     new Set(persisted?.announcedResolvedTicketIds ?? []),
   );
   // NOT persisted — deliberately reseeds fresh on every mount, so a
-  // ticket's pre-existing status (from before this chat page was ever
+  // ticket's pre-existing history (from before this chat page was ever
   // opened, or from an earlier visit) never fires a "new" announcement;
-  // only a genuine transition observed while this page is open does. The
-  // resolved-with-no-response prompt above is the one exception that IS
-  // persisted/re-announced across visits — it's meant to keep nagging
-  // until answered, unlike a plain status FYI.
-  const lastAnnouncedStatus = useRef<Record<number, string>>({});
+  // only entries added while this page is open do. Tracks a count (not the
+  // last-seen status) so that every new history row gets its own FYI, even
+  // one that repeats the ticket's current status with a fresh CS note (e.g.
+  // several "On Hold" updates in a row) — a plain status-diff check would
+  // silently swallow those. The resolved-with-no-response prompt above is
+  // the one exception that IS persisted/re-announced across visits — it's
+  // meant to keep nagging until answered, unlike a plain status FYI.
+  const announcedHistoryCount = useRef<Record<number, number>>({});
   // One per webview visit — analytics-only (see ChatSession on the backend),
   // never used for anything the astrologer-facing flows depend on.
   const [sessionId, setSessionId] = useState(() => persisted?.sessionId ?? crypto.randomUUID());
@@ -143,17 +146,19 @@ export function ChatPage() {
     return () => clearInterval(interval);
   }, [messages.length, chatClosed]);
 
-  // Proactively surface every ticket status change (admin side) in the
-  // chat itself, instead of leaving the astrologer to notice a passive
-  // banner. "Resolved" is the one status that gets the interactive
-  // star-rating prompt (see ticketRatingPrompt) — it's the only status
-  // where "how was this resolution?" is a meaningful question. Every other
-  // transition (including the 48h auto-close) gets a plain FYI message
-  // with whatever comment the KAM/CS left.
+  // Proactively surface every ticket status change (admin side OR Zoho) in
+  // the chat itself, instead of leaving the astrologer to notice a passive
+  // banner. "Resolved" (the first time, unrated) is the one status that
+  // gets the interactive star-rating prompt (see ticketRatingPrompt) — it's
+  // the only status where "how was this resolution?" is a meaningful
+  // question. Every other history row (including a repeat of the ticket's
+  // CURRENT status with a fresh CS note, e.g. several "On Hold" updates in
+  // a row, or the 48h auto-close) gets its own plain FYI message.
   useEffect(() => {
     if (!tickets) return;
     for (const ticket of tickets) {
-      const latestNote = ticket.history[ticket.history.length - 1]?.note;
+      const history = ticket.history;
+      const latestNote = history[history.length - 1]?.note;
 
       if (
         ticket.status === "resolved" &&
@@ -161,7 +166,7 @@ export function ChatPage() {
         !announcedResolvedTicketIds.current.has(ticket.id)
       ) {
         announcedResolvedTicketIds.current.add(ticket.id);
-        lastAnnouncedStatus.current[ticket.id] = ticket.status;
+        announcedHistoryCount.current[ticket.id] = history.length;
         setMessages((prev) => [
           ...prev,
           {
@@ -175,8 +180,8 @@ export function ChatPage() {
         continue;
       }
 
-      const previousStatus = lastAnnouncedStatus.current[ticket.id];
-      lastAnnouncedStatus.current[ticket.id] = ticket.status;
+      const previouslyAnnounced = announcedHistoryCount.current[ticket.id];
+      announcedHistoryCount.current[ticket.id] = history.length;
       // Not resolved (anymore) — a stale rating prompt from before (e.g. the
       // ticket auto-closed while unanswered) would 400 if submitted now
       // (record_ticket_rating requires status===resolved server-side), so
@@ -186,22 +191,30 @@ export function ChatPage() {
           prev.map((m) => (m.ticketRatingPrompt === ticket.id ? { ...m, ticketRatingPrompt: undefined } : m)),
         );
       }
-      if (previousStatus === undefined || previousStatus === ticket.status) continue;
-      // Closed via the astrologer's own "Satisfied" click seconds ago —
-      // they already told us themselves; a generic FYI right after that
-      // is pure noise, not new information (confirmed live: this read as
-      // a confusing near-duplicate of their own action).
-      if (ticket.status === "closed" && ticket.satisfaction === "satisfied") continue;
+      // First time seeing this ticket this session — seed the baseline
+      // without dumping its whole pre-existing history as "new" messages.
+      if (previouslyAnnounced === undefined) continue;
+      if (history.length <= previouslyAnnounced) continue;
 
-      const intro = `Regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id}`;
-      const text =
-        ticket.status === "closed" && ticket.satisfaction === null
-          ? `${intro} was automatically marked **Closed** after 48 hours with no response. Still an issue? Just tell me and I'll reopen it.`
-          : `${intro} is marked **${STATUS_LABELS[ticket.status]}** by our team.${latestNote ? ` **${latestNote}**` : ""}`;
-      setMessages((prev) => [
-        ...prev,
-        { id: makeId(), role: "assistant", text, status: "sent", isTicketStatusUpdate: true },
-      ]);
+      // Announce every row added since the last poll (not just the latest)
+      // so a burst of updates between 15s polls doesn't collapse into one.
+      for (const entry of history.slice(previouslyAnnounced)) {
+        // Closed via the astrologer's own "Satisfied" click seconds ago —
+        // they already told us themselves; a generic FYI right after that
+        // is pure noise, not new information (confirmed live: this read as
+        // a confusing near-duplicate of their own action).
+        if (entry.status === "closed" && ticket.satisfaction === "satisfied") continue;
+
+        const intro = `Regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id}`;
+        const text =
+          entry.status === "closed" && ticket.satisfaction === null
+            ? `${intro} was automatically marked **Closed** after 48 hours with no response. Still an issue? Just tell me and I'll reopen it.`
+            : `${intro} is marked **${STATUS_LABELS[entry.status]}** by our team.${entry.note ? ` **${entry.note}**` : ""}`;
+        setMessages((prev) => [
+          ...prev,
+          { id: makeId(), role: "assistant", text, status: "sent", isTicketStatusUpdate: true },
+        ]);
+      }
     }
   }, [tickets]);
 
@@ -221,9 +234,15 @@ export function ChatPage() {
         onSuccess: () => {
           if (rating >= 4) return;
           // Pre-seed so the ticket-watcher effect's next poll doesn't
-          // re-announce this exact transition as a generic FYI —
-          // handleUnsatisfied already says it, right here, immediately.
-          lastAnnouncedStatus.current[ticketId] = "under_review";
+          // re-announce the resulting under_review transition as a generic
+          // FYI — handleUnsatisfied already says it, right here,
+          // immediately. record_ticket_rating appends exactly one history
+          // row for this, so bumping the baseline by 1 (rather than to the
+          // server's new length, which isn't known yet) is exact.
+          const currentTicket = tickets?.find((t) => t.id === ticketId);
+          if (currentTicket) {
+            announcedHistoryCount.current[ticketId] = currentTicket.history.length + 1;
+          }
           handleUnsatisfied();
         },
       },

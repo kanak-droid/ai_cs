@@ -47,6 +47,92 @@ _STATUS_MAP = {
     "closed": "Closed",
 }
 
+# Your ticket layout requires Category, Language, and Sub Issue Category
+# (plus User Type/Sub Status/Comments, handled directly in create_ticket)
+# on every ticket — an AstroHelp-created ticket that leaves these blank
+# fails Zoho's own validation, so an edit (including status changes) can
+# never be saved on it at all. Confirmed live 2026-08-24.
+
+# Our 7 fixed categories (see app/agent/tool_schemas.py) mapped to your 15
+# real Category picklist options — reviewed and confirmed 2026-08-25.
+_ZOHO_CATEGORY_MAP = {
+    "payout": "Payment Queries",
+    "kyc": "Withdrawal / KYC",
+    "profile": "Profile changes",
+    "technical": "Tech Issues",
+    "phone_change": "Profile changes",
+    "no_visibility": "Low Visibility",
+    "other": "User Queries",
+}
+_DEFAULT_ZOHO_CATEGORY = "User Queries"
+
+# sub_category is free-form text the AI model writes at ticket-creation
+# time (see tool_schemas.py — "the tool doesn't validate category content
+# at all"), not a fixed enum, so an exact lookup table isn't possible.
+# This is a best-effort keyword match against it instead — checked in
+# order, first match wins — falling back to "General Inquiry" (a real
+# option in your Sub Issue Category list) when nothing matches, per the
+# 2026-08-25 "map the most, general if unable" decision.
+_ZOHO_SUB_ISSUE_KEYWORDS = [
+    ("withdrawal", "Withdrawal Amount not Received"),
+    ("payout", "Withdrawal Amount not Received"),
+    ("coin", "Coins Not Added"),
+    ("kyc", "KYC"),
+    ("photo", "Profile Change - Astrologer"),
+    ("phone", "Profile Change - Astrologer"),
+    ("profile", "Profile Change - Astrologer"),
+    ("blank", "Blank Screen"),
+    ("screen", "Blank Screen"),
+    ("crash", "Tech Issues"),
+    ("login", "Login Issues"),
+    ("logout", "Unable to Logout"),
+    ("audio", "Audio/Video Call Not Clear"),
+    ("video", "Audio/Video Call Not Clear"),
+    ("notification", "Notifications Not Working"),
+    ("recharge", "Unable to Recharge"),
+    # Checked before the bare "call" below — "low_calls"/"no_calls" (our
+    # no_visibility sub-categories, about not getting enough calls) would
+    # otherwise false-match "call" and get mislabeled as an audio/video
+    # quality issue instead.
+    ("visibility", "Low Visibility"),
+    ("calls", "Low Visibility"),
+    ("call", "Audio/Video Call Not Clear"),
+]
+_DEFAULT_ZOHO_SUB_ISSUE = "General Inquiry"
+
+# Your Language picklist only offers these four — no "English", even
+# though that's a common Astrologer.language value on our side. Per the
+# 2026-08-25 decision, this uses the ASSIGNED CS's language, not the
+# astrologer's — the CS is already language-matched to the astrologer at
+# assignment time (see cs_assignment_client), so this should agree with
+# the astrologer's own language in the vast majority of cases anyway.
+# Falls back to Hindi if the CS has no language Zoho actually supports (or
+# there's no assigned CS at all).
+_ZOHO_LANGUAGE_OPTIONS = {"Hindi", "Tamil", "Telugu", "Malayalam"}
+_DEFAULT_ZOHO_LANGUAGE = "Hindi"
+
+
+def _zoho_category_for(category: str) -> str:
+    return _ZOHO_CATEGORY_MAP.get(category, _DEFAULT_ZOHO_CATEGORY)
+
+
+def _zoho_sub_issue_for(sub_category: str | None) -> str:
+    lowered = (sub_category or "").lower()
+    for keyword, value in _ZOHO_SUB_ISSUE_KEYWORDS:
+        if keyword in lowered:
+            return value
+    return _DEFAULT_ZOHO_SUB_ISSUE
+
+
+def _zoho_language_for(ticket: Ticket) -> str:
+    cs = ticket.assigned_cs
+    if cs is not None:
+        for lang in cs.languages:
+            if lang in _ZOHO_LANGUAGE_OPTIONS:
+                return lang
+    return _DEFAULT_ZOHO_LANGUAGE
+
+
 # In-memory cache for the OAuth access token — Zoho's are short-lived
 # (~1 hour), so refreshing on every call would be wasteful and refreshing
 # never would eventually 401. Module-level is fine: one process, one token.
@@ -166,9 +252,20 @@ def create_ticket(db: Session, ticket: Ticket) -> str | None:
             "description": ticket.description_en,
             "departmentId": settings.ZOHO_DEPARTMENT_ID,
             "status": zoho_status_for(ticket),
+            "category": _zoho_category_for(ticket.category),
+            "language": _zoho_language_for(ticket),
             "contact": {
                 "lastName": astrologer.name or f"Astrologer #{astrologer.id}",
                 "phone": astrologer.phone,
+            },
+            # Required by your layout's validation (see the module-level
+            # comment above) — a ticket missing these can never be edited/
+            # saved again on the Zoho side at all, not just at creation.
+            "cf": {
+                "cf_user_type": "Astrologer",
+                "cf_sub_status": "RNR 1",
+                "cf_sub_issue": _zoho_sub_issue_for(ticket.sub_category),
+                "cf_comments": "Raised via AstroHelp chatbot",
             },
         }
         agent_id = find_agent_id_by_email(ticket.assigned_cs.email if ticket.assigned_cs else None)
