@@ -99,6 +99,44 @@ class Settings(BaseSettings):
     # API needs an ID, unlike the incoming webhook above.
     SLACK_UPLOAD_CHANNEL_ID: str = ""
 
+    # MoEngage — fired on every ticket status change (see
+    # app/integrations/moengage_client.py) so their dashboard-side campaigns
+    # can decide which transitions actually trigger a push notification to
+    # the astrologer; this backend only ever emits the event, never a push
+    # itself. Own mock switch, same reasoning as SLACK_MOCK_MODE. Real Data
+    # API shape: POST {MOENGAGE_EVENT_API_URL} with HTTP basic auth
+    # (MOENGAGE_APP_ID as username, MOENGAGE_API_KEY as password) — data
+    # center subdomain (api-01/02/03/04) depends on the MoEngage account,
+    # confirm the right one before flipping MOENGAGE_MOCK_MODE off.
+    MOENGAGE_MOCK_MODE: bool = True
+    MOENGAGE_EVENT_API_URL: str = "https://api-01.moengage.com/v1/event/{app_id}"
+    MOENGAGE_APP_ID: str = ""
+    MOENGAGE_API_KEY: str = ""
+
+    # Zoho Desk — two-way ticket sync. Push: every cs_notified ticket gets
+    # mirrored into Zoho on creation, kept in sync as its status changes
+    # (see app/integrations/zoho_client.py, called from ticket_service.py).
+    # Pull: a Zoho workflow-rule webhook posts to
+    # /api/integrations/zoho/webhook (see app/api/routes/integrations/
+    # zoho_webhook.py) on ticket status change there. Own mock switch, same
+    # reasoning as SLACK_MOCK_MODE/MOENGAGE_MOCK_MODE. Unlike every other
+    # integration here, Zoho auth is OAuth (client id/secret + refresh
+    # token, not a static key) — zoho_client caches and refreshes the
+    # short-lived access token itself.
+    ZOHO_MOCK_MODE: bool = True
+    ZOHO_ACCOUNTS_DOMAIN: str = "https://accounts.zoho.in"
+    ZOHO_API_DOMAIN: str = "https://desk.zoho.in"
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    ZOHO_REFRESH_TOKEN: str = ""
+    ZOHO_ORG_ID: str = ""
+    ZOHO_DEPARTMENT_ID: str = ""
+    # Shared secret the inbound webhook checks for in the
+    # X-Zoho-Webhook-Secret header — set this same value in the Zoho
+    # workflow rule's webhook action. Not an OAuth credential; just a
+    # bearer secret, same convention as everything else in this app.
+    ZOHO_WEBHOOK_SECRET: str = ""
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
 

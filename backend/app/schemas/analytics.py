@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -40,6 +42,21 @@ class AnalyticsOverview(BaseModel):
     unsatisfied_count: int
     avg_bot_rating: float | None = None
     rating_distribution: dict[str, int]
+    # The astrologer's 1-5 star rating of a ticket's resolution — distinct
+    # from avg_bot_rating/rating_distribution above, which are the bot
+    # CONVERSATION rating (ChatSession.rating), not tied to any ticket.
+    avg_ticket_rating: float | None = None
+    ticket_rating_distribution: dict[str, int]
     kam_performance: list[KamPerformance]
     weekly_ticket_trend: list[TicketPeriodCount]
     monthly_ticket_trend: list[TicketPeriodCount]
+
+
+class TicketRatingEntry(BaseModel):
+    ticket_id: int
+    astrologer_name: str
+    category: str
+    rating: int
+    reasons: list[str]
+    comment: str | None
+    rated_at: datetime

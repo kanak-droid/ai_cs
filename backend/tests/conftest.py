@@ -20,19 +20,24 @@ from app.models.enums import AdminAccessLevel
 
 @pytest.fixture(autouse=True)
 def _isolate_from_real_network(monkeypatch):
-    # Whatever a developer's local .env has MOCK_MODE/SLACK_MOCK_MODE set to
-    # (e.g. a real Slack webhook wired up for manual testing) must never leak
-    # into the test suite — tests always exercise the mocked path. A blocked
-    # httpx call as a backstop turns "forgot to mock this" into a loud
-    # failure instead of a real network call slipping through.
+    # Whatever a developer's local .env has MOCK_MODE/SLACK_MOCK_MODE/
+    # ZOHO_MOCK_MODE/MOENGAGE_MOCK_MODE set to (e.g. real Zoho Desk/Slack
+    # credentials wired up for manual testing) must never leak into the
+    # test suite — tests always exercise the mocked path. A blocked httpx
+    # call as a backstop turns "forgot to mock this" into a loud failure
+    # instead of a real network call (e.g. actually creating/mutating a
+    # ticket in Zoho Desk) slipping through.
     monkeypatch.setattr(settings, "MOCK_MODE", True)
     monkeypatch.setattr(settings, "SLACK_MOCK_MODE", True)
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", True)
+    monkeypatch.setattr(settings, "MOENGAGE_MOCK_MODE", True)
 
     def _blocked(*args, **kwargs):
         raise RuntimeError("Real network calls are not allowed in tests.")
 
     monkeypatch.setattr(httpx, "post", _blocked)
     monkeypatch.setattr(httpx, "get", _blocked)
+    monkeypatch.setattr(httpx, "patch", _blocked)
 
 
 @pytest.fixture(scope="session")

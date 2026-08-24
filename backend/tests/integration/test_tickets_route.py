@@ -1,3 +1,4 @@
+from app.models.enums import TicketStatus
 from app.services import ticket_service
 
 
@@ -59,3 +60,85 @@ def test_get_ticket_not_owned_by_astrologer_returns_404(
 def test_missing_auth_header_is_rejected(client):
     response = client.get("/api/tickets")
     assert response.status_code in (401, 403)
+
+
+def test_submit_rating_closes_ticket_when_rating_is_high(
+    client, db_session, seeded_astrologer, astrologer_auth_header
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+
+    response = client.post(
+        f"/api/tickets/{ticket.id}/rating",
+        headers=astrologer_auth_header,
+        json={"rating": 5, "reasons": ["Quick response"], "comment": None},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "closed"
+    assert body["rating"] == 5
+    assert body["rating_reasons"] == ["Quick response"]
+
+
+def test_submit_rating_reopens_ticket_when_rating_is_low(
+    client, db_session, seeded_astrologer, astrologer_auth_header
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+
+    response = client.post(
+        f"/api/tickets/{ticket.id}/rating",
+        headers=astrologer_auth_header,
+        json={"rating": 2, "reasons": ["Took too long"], "comment": "Not actually fixed"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "under_review"
+    assert body["rating"] == 2
+
+
+def test_submit_rating_rejects_out_of_range_score(
+    client, db_session, seeded_astrologer, astrologer_auth_header
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+
+    response = client.post(
+        f"/api/tickets/{ticket.id}/rating",
+        headers=astrologer_auth_header,
+        json={"rating": 6},
+    )
+
+    assert response.status_code == 422

@@ -236,6 +236,18 @@ def get_overview(
         .all()
     )
 
+    ticket_rating_rows = (
+        ticket_query.filter(Ticket.rating.isnot(None))
+        .with_entities(Ticket.rating, func.count(Ticket.id))
+        .group_by(Ticket.rating)
+        .all()
+    )
+    avg_ticket_rating = (
+        ticket_query.filter(Ticket.rating.isnot(None))
+        .with_entities(func.avg(Ticket.rating))
+        .scalar()
+    )
+
     rating_rows = (
         session_query.filter(ChatSession.rating.isnot(None))
         .with_entities(ChatSession.rating, func.count(ChatSession.id))
@@ -262,6 +274,8 @@ def get_overview(
         "unsatisfied_count": satisfaction_counts.get("unsatisfied", 0),
         "avg_bot_rating": float(avg_bot_rating) if avg_bot_rating is not None else None,
         "rating_distribution": {str(rating): count for rating, count in rating_rows},
+        "avg_ticket_rating": float(avg_ticket_rating) if avg_ticket_rating is not None else None,
+        "ticket_rating_distribution": {str(rating): count for rating, count in ticket_rating_rows},
         # Deliberately NOT filtered by astrologer_ids/priority — a KAM/CS's
         # overall workload numbers wouldn't make sense scoped to only one
         # priority tier's astrologers; this table is its own view. Date
@@ -274,3 +288,40 @@ def get_overview(
             db, bucket="month", date_from=date_from, date_to=date_to
         ),
     }
+
+
+def list_ticket_ratings(
+    db: Session,
+    *,
+    priority: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[dict]:
+    """Every individual ticket rating, newest first — backs the admin
+    dashboard's "view all ratings" panel on the ticket-rating stat card.
+    Same priority/date scoping as get_overview's ticket_rating_distribution,
+    so the list an admin expands always matches the number it's expanding.
+    """
+    astrologer_ids = _astrologer_ids_matching_priority(db, priority)
+
+    query = db.query(Ticket).filter(Ticket.rating.isnot(None))
+    if astrologer_ids is not None:
+        query = query.filter(Ticket.astrologer_id.in_(astrologer_ids))
+    if date_from is not None:
+        query = query.filter(Ticket.created_at >= _day_start(date_from))
+    if date_to is not None:
+        query = query.filter(Ticket.created_at < _day_start(date_to + timedelta(days=1)))
+
+    tickets = query.order_by(Ticket.rated_at.desc()).all()
+    return [
+        {
+            "ticket_id": t.id,
+            "astrologer_name": t.astrologer.name,
+            "category": t.category,
+            "rating": t.rating,
+            "reasons": t.rating_reasons or [],
+            "comment": t.rating_comment,
+            "rated_at": t.rated_at,
+        }
+        for t in tickets
+    ]

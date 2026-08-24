@@ -1,4 +1,5 @@
 import type { PriorityFilter } from "@astrohelp/shared";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { DateRangeFilter } from "../../../components/DateRangeFilter";
@@ -7,6 +8,7 @@ import { Spinner } from "../../../components/Spinner";
 import { useAnalytics } from "../api/useAnalytics";
 import { KamPerformanceTable } from "../components/KamPerformanceTable";
 import { StatCard } from "../components/StatCard";
+import { TicketRatingsModal } from "../components/TicketRatingsModal";
 import { TicketTrendChart } from "../components/TicketTrendChart";
 import { TopCategoriesList } from "../components/TopCategoriesList";
 
@@ -38,6 +40,7 @@ export function AnalyticsPage() {
   const dateFrom = searchParams.get("from") ?? undefined;
   const dateTo = searchParams.get("to") ?? undefined;
   const { data: overview, status } = useAnalytics(priority, dateFrom, dateTo);
+  const [ratingsOpen, setRatingsOpen] = useState(false);
 
   if (status === "pending") return <Spinner label="Loading analytics…" />;
   if (status === "error" || !overview) return <EmptyState title="Couldn't load analytics" />;
@@ -48,6 +51,10 @@ export function AnalyticsPage() {
   const satisfiedPct =
     totalSatisfaction > 0 ? Math.round((overview.satisfied_count / totalSatisfaction) * 100) : null;
   const totalRatings = Object.values(overview.rating_distribution).reduce((sum, n) => sum + n, 0);
+  const totalTicketRatings = Object.values(overview.ticket_rating_distribution).reduce(
+    (sum, n) => sum + n,
+    0,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -105,7 +112,7 @@ export function AnalyticsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <StatCard
           label="Avg. time to bot resolution"
           value={formatSeconds(overview.avg_bot_resolution_seconds)}
@@ -115,7 +122,31 @@ export function AnalyticsPage() {
           value={formatHours(overview.avg_ticket_resolution_hours)}
           hint="Created to resolved"
         />
+        <button
+          type="button"
+          onClick={() => setRatingsOpen(true)}
+          className="rounded-2xl text-left transition hover:ring-1 hover:ring-terracotta/30"
+        >
+          <StatCard
+            label="Ticket resolution rating"
+            value={overview.avg_ticket_rating !== null ? overview.avg_ticket_rating.toFixed(1) : "—"}
+            hint={
+              totalTicketRatings > 0
+                ? `out of 5 stars · ${totalTicketRatings} rating${totalTicketRatings === 1 ? "" : "s"} · view all →`
+                : "out of 5 stars · no ratings yet"
+            }
+          />
+        </button>
       </div>
+
+      {ratingsOpen && (
+        <TicketRatingsModal
+          onClose={() => setRatingsOpen(false)}
+          priority={priority}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <TicketTrendChart title="Week by week" data={overview.weekly_ticket_trend} granularity="week" />

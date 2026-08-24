@@ -29,6 +29,14 @@ export interface Ticket {
   status: TicketStatus;
   resolved_at: string | null;
   satisfaction: "satisfied" | "unsatisfied" | null;
+  // The astrologer's 1-5 star rating of the most recent resolution —
+  // >=4 is what sets satisfaction to "satisfied" (see backend's
+  // record_ticket_rating). reasons/comment/rated_at are null until rated,
+  // and reset back to null on any later resolve/reopen cycle.
+  rating: number | null;
+  rating_reasons: string[] | null;
+  rating_comment: string | null;
+  rated_at: string | null;
   // Set by a CS escalating to the KAM (see the "Escalate to KAM" action) —
   // excludes this ticket from a CS's "resolved" tally in analytics even
   // though assigned_cs_id doesn't change.

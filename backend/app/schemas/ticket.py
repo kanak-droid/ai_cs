@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TicketStatus
 
@@ -32,6 +32,10 @@ class TicketRead(BaseModel):
     status: TicketStatus
     resolved_at: datetime | None = None
     satisfaction: str | None = None
+    rating: int | None = None
+    rating_reasons: list[str] | None = None
+    rating_comment: str | None = None
+    rated_at: datetime | None = None
     escalated_to_kam: bool
     escalated_at: datetime | None = None
     created_at: datetime
@@ -44,8 +48,10 @@ class TicketStatusUpdateRequest(BaseModel):
     note: str | None = None
 
 
-class TicketSatisfactionRequest(BaseModel):
-    satisfied: bool
+class TicketRatingRequest(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    reasons: list[str] = Field(default_factory=list)
+    comment: str | None = None
 
 
 class TicketReassignRequest(BaseModel):

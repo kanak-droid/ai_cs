@@ -45,11 +45,13 @@ def test_overview_counts_ticket_satisfaction(db_session, seeded_astrologer):
     ticket = ticket_service.transition_status(
         db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
     )
-    ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
+    ticket_service.record_ticket_rating(db_session, ticket, rating=5, reasons=["Quick response"], comment=None)
 
     overview = analytics_service.get_overview(db_session)
 
     assert overview["satisfied_count"] >= 1
+    assert overview["avg_ticket_rating"] is not None
+    assert overview["ticket_rating_distribution"].get("5", 0) >= 1
 
 
 def test_overview_averages_bot_feedback_rating(db_session, seeded_astrologer):
@@ -62,6 +64,33 @@ def test_overview_averages_bot_feedback_rating(db_session, seeded_astrologer):
 
     assert overview["avg_bot_rating"] is not None
     assert overview["rating_distribution"].get("4", 0) >= 1
+
+
+def test_list_ticket_ratings_returns_individual_entries(db_session, seeded_astrologer):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="kyc",
+        sub_category="kyc_rejected",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed"
+    )
+    ticket_service.record_ticket_rating(
+        db_session, ticket, rating=2, reasons=["Took too long"], comment="Still slow"
+    )
+
+    entries = analytics_service.list_ticket_ratings(db_session)
+
+    matching = [e for e in entries if e["ticket_id"] == ticket.id]
+    assert len(matching) == 1
+    assert matching[0]["rating"] == 2
+    assert matching[0]["reasons"] == ["Took too long"]
+    assert matching[0]["comment"] == "Still slow"
+    assert matching[0]["astrologer_name"] == seeded_astrologer.name
 
 
 def test_kam_performance_counts_pending_assigned_and_solved(

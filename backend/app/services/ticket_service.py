@@ -6,6 +6,7 @@ so the two can never diverge — there is deliberately no other way to change a
 ticket's status (no DB trigger, no ORM event hook; see the build plan for why).
 """
 
+import logging
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import and_, func, or_, select
@@ -17,14 +18,18 @@ from app.core.time import utcnow
 from app.integrations import (
     admin_mapping_client,
     cs_assignment_client,
+    moengage_client,
     queue_performance_client,
     slack_client,
+    zoho_client,
 )
 from app.models.admin import Admin
 from app.models.astrologer import Astrologer
 from app.models.enums import ADMIN_SETTABLE_STATUSES, AdminRole, TicketStatus
 from app.models.ticket import Ticket
 from app.models.ticket_status_history import TicketStatusHistory
+
+logger = logging.getLogger(__name__)
 
 # A resolved ticket the astrologer never responds to (satisfied/unsatisfied)
 # auto-closes after this long. Shortened from 5 days to 48 hours (2026-08-20)
@@ -135,11 +140,61 @@ def _record_status(
     db.add(TicketStatusHistory(ticket_id=ticket.id, status=status, changed_by=changed_by, note=note))
     ticket.status = status
     if status == TicketStatus.RESOLVED:
-        # Fresh resolution — start (or restart, after a reopen) the 5-day
-        # satisfaction-response clock, and clear any satisfaction left over
-        # from an earlier resolve/reopen cycle on this same ticket.
+        # Fresh resolution — start (or restart, after a reopen) the
+        # satisfaction-response clock, and clear any rating/satisfaction
+        # left over from an earlier resolve/reopen cycle on this same ticket.
         ticket.resolved_at = utcnow()
         ticket.satisfaction = None
+        ticket.rating = None
+        ticket.rating_reasons = None
+        ticket.rating_comment = None
+        ticket.rated_at = None
+
+    # Fire-and-forget: lets MoEngage's own campaigns decide which status
+    # changes actually push a notification to the astrologer. This is the
+    # one call site for every status write in the app, so nothing needs its
+    # own notify call — but exactly because of that, a bug or outage here
+    # must never take down a real status transition, hence the belt-and-
+    # suspenders try/except even though moengage_client already catches its
+    # own network errors internally.
+    try:
+        moengage_client.send_ticket_status_event(
+            ticket, new_status=status.value, changed_by=changed_by, note=note
+        )
+    except Exception:
+        logger.exception("MoEngage event dispatch raised unexpectedly for ticket #%s", ticket.id)
+
+    # Same reasoning, same belt-and-suspenders wrapping — keep an already-
+    # pushed Zoho Desk ticket's status in sync. No-ops (inside zoho_client)
+    # for a ticket that was never pushed (zoho_ticket_id is None).
+    if ticket.zoho_ticket_id is not None:
+        try:
+            zoho_client.update_status(ticket.zoho_ticket_id, zoho_client.zoho_status_for(ticket))
+        except Exception:
+            logger.exception("Zoho Desk status sync raised unexpectedly for ticket #%s", ticket.id)
+
+
+def _maybe_push_to_zoho(db: Session, ticket: Ticket) -> None:
+    """Pushes a ticket into Zoho Desk the first time it becomes cs_notified
+    — either right after creation, or later via reassign_ticket flipping
+    cs_notified True for a ticket that started without a CS (e.g. a
+    'profile' category ticket). No-ops if already pushed or still not
+    cs_notified. Same safety requirement as every other integration call
+    here: a Zoho outage must never block the ticket write it's attached to.
+    """
+    if ticket.zoho_ticket_id is not None or not ticket.cs_notified:
+        return
+    try:
+        ticket.zoho_ticket_id = zoho_client.create_ticket(ticket)
+    except Exception:
+        logger.exception("Zoho Desk ticket creation raised unexpectedly for ticket #%s", ticket.id)
+        return
+
+    if ticket.zoho_ticket_id is not None and ticket.attachment_url:
+        try:
+            zoho_client.upload_attachment(ticket.zoho_ticket_id, ticket.attachment_url)
+        except Exception:
+            logger.exception("Zoho Desk attachment upload raised unexpectedly for ticket #%s", ticket.id)
 
 
 def _log_note(db: Session, ticket: Ticket, *, changed_by: str, note: str) -> None:
@@ -271,6 +326,8 @@ def create_ticket(
         # creation if it fails.
         slack_client.upload_attachment(db, attachment_url=attachment_url, ticket_id=ticket.id)
 
+    _maybe_push_to_zoho(db, ticket)
+
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -348,6 +405,25 @@ def reassign_ticket(
         log_line += f" — {note}"
     _log_note(db, ticket, changed_by=changed_by, note=log_line)
 
+    if role == "cs":
+        # Covers a ticket that started without a CS (e.g. 'profile'
+        # category, never pushed at creation) and is only now being handed
+        # to one — create_ticket's own agent-matching already assigns the
+        # right owner in this case.
+        _maybe_push_to_zoho(db, ticket)
+        # Already-pushed ticket handed to a DIFFERENT CS — the Zoho ticket
+        # still shows the old owner unless we explicitly update it (a
+        # status change alone, via _record_status, never touches assignee).
+        if ticket.zoho_ticket_id is not None:
+            agent_id = zoho_client.find_agent_id_by_email(new_admin.email)
+            if agent_id:
+                try:
+                    zoho_client.update_assignee(ticket.zoho_ticket_id, agent_id)
+                except Exception:
+                    logger.exception(
+                        "Zoho Desk assignee update raised unexpectedly for ticket #%s", ticket.id
+                    )
+
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -378,21 +454,43 @@ def escalate_to_kam(db: Session, ticket: Ticket, *, changed_by: str, note: str) 
     ticket.escalated_at = utcnow()
     _log_note(db, ticket, changed_by=changed_by, note=f"Escalated to KAM — {note.strip()}")
 
+    # Escalation isn't a status transition, so it never goes through
+    # _record_status's own Zoho status-sync call — push the "Escalated"
+    # status directly here instead. _maybe_push_to_zoho first, in case this
+    # ticket was somehow never pushed at all (defensive; escalation is
+    # normally a CS action on an already-cs_notified, already-pushed ticket).
+    _maybe_push_to_zoho(db, ticket)
+    if ticket.zoho_ticket_id is not None:
+        try:
+            zoho_client.update_status(ticket.zoho_ticket_id, zoho_client.zoho_status_for(ticket))
+        except Exception:
+            logger.exception("Zoho Desk escalation status sync raised unexpectedly for ticket #%s", ticket.id)
+
     db.commit()
     db.refresh(ticket)
     return ticket
 
 
-def record_satisfaction(db: Session, ticket: Ticket, *, satisfied: bool) -> Ticket:
-    """The astrologer's response to a resolved ticket, from the chat webview.
-
-    Satisfied closes it out. Unsatisfied reopens it (back to under_review, so
-    it lands in the KAM's queue again) rather than leaving it "resolved" when
-    the astrologer says it isn't — the bot then asks what's still wrong.
+def record_ticket_rating(
+    db: Session, ticket: Ticket, *, rating: int, reasons: list[str], comment: str | None
+) -> Ticket:
+    """The astrologer's 1-5 star rating of a resolved ticket, from the chat
+    webview or the tickets page. The score itself decides what used to be a
+    separate satisfied/unsatisfied click: >=4 closes the ticket out, <=3
+    reopens it (back to under_review, so it lands in the KAM's queue again)
+    rather than leaving it "resolved" when the astrologer says it isn't —
+    the bot then asks what's still wrong. `reasons` is whichever preset list
+    the frontend showed for that score band (positive or negative); both it
+    and `comment` are stored as-is, no validation on their contents.
     """
     if ticket.status != TicketStatus.RESOLVED:
-        raise AppError("This ticket isn't awaiting a satisfaction response.")
+        raise AppError("This ticket isn't awaiting a rating.")
 
+    satisfied = rating >= 4
+    ticket.rating = rating
+    ticket.rating_reasons = reasons
+    ticket.rating_comment = comment
+    ticket.rated_at = utcnow()
     ticket.satisfaction = "satisfied" if satisfied else "unsatisfied"
     if satisfied:
         _record_status(db, ticket, TicketStatus.CLOSED, changed_by="astrologer", note="Confirmed resolved")
@@ -513,9 +611,12 @@ def list_all_tickets(
     `sort`: "desc"/"asc" order by creation time as before; "priority" orders
     by the astrologer's current queue priority (lower number = more urgent
     first — same source get_priority_ranking/create_ticket's VIP check use),
-    ties broken by newest first. Priority isn't a DB column (an astrologer's
-    priority can change independently of any ticket), so this is a Python
-    sort after fetching rather than a SQL ORDER BY.
+    ties broken by oldest first (so within a priority tier, whoever's been
+    waiting longest surfaces first). Priority isn't a DB column (an
+    astrologer's priority can change independently of any ticket), so this
+    is a Python sort after fetching rather than a SQL ORDER BY — relies on
+    Python's sort being stable, so tickets must be fetched oldest-first
+    before the priority sort is applied.
 
     `date_from`/`date_to` filter on Ticket.created_at (when it was raised,
     not when it was resolved) — both inclusive, either can be given alone
@@ -539,7 +640,7 @@ def list_all_tickets(
         stmt = stmt.where(Ticket.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
 
     if sort == "priority":
-        stmt = stmt.order_by(Ticket.created_at.desc())
+        stmt = stmt.order_by(Ticket.created_at.asc())
         tickets = list(db.scalars(stmt).all())
         tickets.sort(key=lambda t: queue_performance_client.priority_sort_key(db, t.astrologer_id))
         return [_maybe_auto_close_stale(db, t) for t in tickets]

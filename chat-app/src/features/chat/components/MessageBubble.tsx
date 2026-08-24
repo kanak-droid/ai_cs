@@ -1,3 +1,4 @@
+import { TicketRatingWidget } from "../../tickets/components/TicketRatingWidget";
 import type { DisplayMessage } from "../types";
 import { FeedbackWidget } from "./FeedbackWidget";
 import { ToolActionIndicator } from "./ToolActionIndicator";
@@ -19,13 +20,13 @@ export function MessageBubble({
   message,
   showResolvePrompt,
   onFeedbackSubmit,
-  onTicketSatisfaction,
+  onTicketRating,
   onResolveConfirm,
 }: {
   message: DisplayMessage;
   showResolvePrompt: boolean;
   onFeedbackSubmit: (rating: number, comment: string) => void;
-  onTicketSatisfaction: (ticketId: number, satisfied: boolean) => void;
+  onTicketRating: (ticketId: number, rating: number, reasons: string[], comment: string | null) => void;
   onResolveConfirm: () => void;
 }) {
   const isAstrologer = message.role === "astrologer";
@@ -75,22 +76,14 @@ export function MessageBubble({
           Yes, this solved it — close chat
         </button>
       )}
-      {message.ticketSatisfactionPrompt !== undefined && (
-        <div className="mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => onTicketSatisfaction(message.ticketSatisfactionPrompt!, true)}
-            className="rounded-full bg-moss px-3 py-1.5 text-xs font-medium text-white"
-          >
-            Satisfied
-          </button>
-          <button
-            type="button"
-            onClick={() => onTicketSatisfaction(message.ticketSatisfactionPrompt!, false)}
-            className="rounded-full border border-night/15 px-3 py-1.5 text-xs font-medium text-night/70"
-          >
-            Not satisfied
-          </button>
+      {message.ticketRatingPrompt !== undefined && (
+        <div className="mt-2 max-w-[80%]">
+          <TicketRatingWidget
+            ticketId={message.ticketRatingPrompt}
+            onSubmit={(ticketId, rating, reasons, comment) =>
+              onTicketRating(ticketId, rating, reasons, comment)
+            }
+          />
         </div>
       )}
     </div>

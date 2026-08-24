@@ -9,14 +9,20 @@ export function MessageList({
   isWaitingForReply,
   chatClosed,
   onFeedbackSubmit,
-  onTicketSatisfaction,
+  onTicketRating,
   onResolveConfirm,
 }: {
   messages: DisplayMessage[];
   isWaitingForReply: boolean;
   chatClosed: boolean;
   onFeedbackSubmit: (messageId: string, rating: number, comment: string) => void;
-  onTicketSatisfaction: (messageId: string, ticketId: number, satisfied: boolean) => void;
+  onTicketRating: (
+    messageId: string,
+    ticketId: number,
+    rating: number,
+    reasons: string[],
+    comment: string | null,
+  ) => void;
   onResolveConfirm: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -39,14 +45,14 @@ export function MessageList({
             !chatClosed &&
             !message.showFeedback &&
             !message.isTicketStatusUpdate &&
-            message.ticketSatisfactionPrompt === undefined &&
+            message.ticketRatingPrompt === undefined &&
             message.role === "assistant" &&
             message.id !== "welcome" &&
             message.id === lastMessageId
           }
           onFeedbackSubmit={(rating, comment) => onFeedbackSubmit(message.id, rating, comment)}
-          onTicketSatisfaction={(ticketId, satisfied) =>
-            onTicketSatisfaction(message.id, ticketId, satisfied)
+          onTicketRating={(ticketId, rating, reasons, comment) =>
+            onTicketRating(message.id, ticketId, rating, reasons, comment)
           }
           onResolveConfirm={onResolveConfirm}
         />

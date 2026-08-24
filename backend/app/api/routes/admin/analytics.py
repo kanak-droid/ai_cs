@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_db
 from app.core.security import AdminContext
-from app.schemas.analytics import AnalyticsOverview
+from app.schemas.analytics import AnalyticsOverview, TicketRatingEntry
 from app.services import analytics_service
 
 router = APIRouter(tags=["admin"])
@@ -23,3 +23,19 @@ def get_analytics_overview(
     return AnalyticsOverview(
         **analytics_service.get_overview(db, priority=priority, date_from=date_from, date_to=date_to)
     )
+
+
+@router.get("/api/admin/analytics/ticket-ratings", response_model=list[TicketRatingEntry])
+def get_ticket_ratings(
+    priority: Literal["1", "2", "3", "4", "5", "unranked"] | None = Query(default=None),
+    date_from: date | None = Query(default=None, alias="from"),
+    date_to: date | None = Query(default=None, alias="to"),
+    admin: AdminContext = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> list[TicketRatingEntry]:
+    return [
+        TicketRatingEntry(**row)
+        for row in analytics_service.list_ticket_ratings(
+            db, priority=priority, date_from=date_from, date_to=date_to
+        )
+    ]

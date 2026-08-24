@@ -15,9 +15,9 @@ export interface DisplayMessage {
   showFeedback?: boolean;
   feedbackSubmitted?: boolean;
   // Set when this message is the bot proactively announcing a ticket just
-  // got resolved — renders inline Satisfied/Not satisfied buttons for that
-  // ticket id. Cleared once the astrologer responds.
-  ticketSatisfactionPrompt?: number;
+  // got resolved — renders an inline star-rating widget for that ticket id.
+  // Cleared once the astrologer submits a rating.
+  ticketRatingPrompt?: number;
   // Set on the plain ticket-status-change announcements (any transition
   // other than the resolved prompt above) — excludes them from the
   // unrelated "did this solve it?" bot resolve-confirm button, which

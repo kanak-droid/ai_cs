@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import auth, chat, feedback, tickets, uploads
+from app.api.routes import auth, chat, feedback, tickets, uploads, zoho_webhook
 from app.api.routes.admin import admins as admin_admins
 from app.api.routes.admin import analytics as admin_analytics
 from app.api.routes.admin import astrologers as admin_astrologers
@@ -73,6 +73,7 @@ app.include_router(admin_analytics.router)
 app.include_router(admin_chat_logs.router)
 app.include_router(admin_email_log.router)
 app.include_router(admin_sheets_sync.router)
+app.include_router(zoho_webhook.router)
 
 
 @app.get("/health")

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_astrologer, get_db
 from app.core.security import AstrologerContext
-from app.schemas.ticket import TicketRead, TicketSatisfactionRequest
+from app.schemas.ticket import TicketRatingRequest, TicketRead
 from app.services import ticket_service
 
 router = APIRouter(tags=["tickets"])
@@ -28,13 +28,15 @@ def get_my_ticket(
     return TicketRead.model_validate(ticket)
 
 
-@router.post("/api/tickets/{ticket_id}/satisfaction", response_model=TicketRead)
-def submit_satisfaction(
+@router.post("/api/tickets/{ticket_id}/rating", response_model=TicketRead)
+def submit_ticket_rating(
     ticket_id: int,
-    body: TicketSatisfactionRequest,
+    body: TicketRatingRequest,
     astrologer: AstrologerContext = Depends(get_current_astrologer),
     db: Session = Depends(get_db),
 ) -> TicketRead:
     ticket = ticket_service.get_ticket_for_astrologer(db, ticket_id, astrologer.astrologer_id)
-    ticket = ticket_service.record_satisfaction(db, ticket, satisfied=body.satisfied)
+    ticket = ticket_service.record_ticket_rating(
+        db, ticket, rating=body.rating, reasons=body.reasons, comment=body.comment
+    )
     return TicketRead.model_validate(ticket)

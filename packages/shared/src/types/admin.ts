@@ -86,7 +86,22 @@ export interface AnalyticsOverview {
   unsatisfied_count: number;
   avg_bot_rating: number | null;
   rating_distribution: Record<string, number>;
+  // The astrologer's 1-5 star rating of a ticket's resolution — distinct
+  // from avg_bot_rating/rating_distribution above (the bot CONVERSATION
+  // rating, not tied to any ticket).
+  avg_ticket_rating: number | null;
+  ticket_rating_distribution: Record<string, number>;
   kam_performance: KamPerformance[];
   weekly_ticket_trend: TicketPeriodCount[];
   monthly_ticket_trend: TicketPeriodCount[];
+}
+
+export interface TicketRatingEntry {
+  ticket_id: number;
+  astrologer_name: string;
+  category: string;
+  rating: number;
+  reasons: string[];
+  comment: string | null;
+  rated_at: string;
 }

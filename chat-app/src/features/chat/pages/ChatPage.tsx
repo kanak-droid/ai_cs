@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAstrologer } from "../../../session/AstrologerContext";
 import { casualFirstName } from "../../../lib/casualFirstName";
 import { ticketsKeys } from "../../tickets/api/queryKeys";
-import { useSubmitSatisfaction } from "../../tickets/api/useSubmitSatisfaction";
+import { useSubmitTicketRating } from "../../tickets/api/useSubmitTicketRating";
 import { useTickets } from "../../tickets/api/useTickets";
 import { submitSessionFeedback } from "../api/feedbackApi";
 import { uploadAttachment } from "../api/uploadApi";
@@ -66,7 +66,7 @@ export function ChatPage() {
   const sendMessage = useSendMessage();
   const queryClient = useQueryClient();
   const { data: tickets } = useTickets();
-  const submitSatisfaction = useSubmitSatisfaction();
+  const submitTicketRating = useSubmitTicketRating();
   // Restored from sessionStorage when present — otherwise the transcript
   // (and the ticket-announcement/session-id state below) would reset every
   // time ChatPage unmounts, which react-router does on every route change
@@ -146,10 +146,10 @@ export function ChatPage() {
   // Proactively surface every ticket status change (admin side) in the
   // chat itself, instead of leaving the astrologer to notice a passive
   // banner. "Resolved" is the one status that gets the interactive
-  // satisfied/not-satisfied prompt (see ticketSatisfactionPrompt) — it's
-  // the only status where "are you satisfied with this?" is a meaningful
-  // question. Every other transition (including the 48h auto-close) gets
-  // a plain FYI message with whatever comment the KAM/CS left.
+  // star-rating prompt (see ticketRatingPrompt) — it's the only status
+  // where "how was this resolution?" is a meaningful question. Every other
+  // transition (including the 48h auto-close) gets a plain FYI message
+  // with whatever comment the KAM/CS left.
   useEffect(() => {
     if (!tickets) return;
     for (const ticket of tickets) {
@@ -167,9 +167,9 @@ export function ChatPage() {
           {
             id: makeId(),
             role: "assistant",
-            text: `Good news — regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id} is marked **Resolved** by our team.${latestNote ? ` **${latestNote}**` : ""} Did this fix your issue?`,
+            text: `Good news — regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id} is marked **Resolved** by our team.${latestNote ? ` **${latestNote}**` : ""} Please rate how we handled it:`,
             status: "sent",
-            ticketSatisfactionPrompt: ticket.id,
+            ticketRatingPrompt: ticket.id,
           },
         ]);
         continue;
@@ -177,15 +177,13 @@ export function ChatPage() {
 
       const previousStatus = lastAnnouncedStatus.current[ticket.id];
       lastAnnouncedStatus.current[ticket.id] = ticket.status;
-      // Not resolved (anymore) — a stale Satisfied/Not-satisfied prompt
-      // from before (e.g. the ticket auto-closed while unanswered) would
-      // 400 if clicked now (record_satisfaction requires status===resolved
-      // server-side), so clear it rather than leave a dead button.
+      // Not resolved (anymore) — a stale rating prompt from before (e.g. the
+      // ticket auto-closed while unanswered) would 400 if submitted now
+      // (record_ticket_rating requires status===resolved server-side), so
+      // clear it rather than leave a dead widget.
       if (ticket.status !== "resolved") {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.ticketSatisfactionPrompt === ticket.id ? { ...m, ticketSatisfactionPrompt: undefined } : m,
-          ),
+          prev.map((m) => (m.ticketRatingPrompt === ticket.id ? { ...m, ticketRatingPrompt: undefined } : m)),
         );
       }
       if (previousStatus === undefined || previousStatus === ticket.status) continue;
@@ -207,15 +205,21 @@ export function ChatPage() {
     }
   }, [tickets]);
 
-  function handleTicketSatisfaction(messageId: string, ticketId: number, satisfied: boolean) {
+  function handleTicketRating(
+    messageId: string,
+    ticketId: number,
+    rating: number,
+    reasons: string[],
+    comment: string | null,
+  ) {
     setMessages((prev) =>
-      prev.map((m) => (m.id === messageId ? { ...m, ticketSatisfactionPrompt: undefined } : m)),
+      prev.map((m) => (m.id === messageId ? { ...m, ticketRatingPrompt: undefined } : m)),
     );
-    submitSatisfaction.mutate(
-      { id: ticketId, satisfied },
+    submitTicketRating.mutate(
+      { id: ticketId, rating, reasons, comment },
       {
         onSuccess: () => {
-          if (satisfied) return;
+          if (rating >= 4) return;
           // Pre-seed so the ticket-watcher effect's next poll doesn't
           // re-announce this exact transition as a generic FYI —
           // handleUnsatisfied already says it, right here, immediately.
@@ -351,7 +355,7 @@ export function ChatPage() {
           isWaitingForReply={sendMessage.isPending}
           chatClosed={chatClosed}
           onFeedbackSubmit={handleFeedbackSubmit}
-          onTicketSatisfaction={handleTicketSatisfaction}
+          onTicketRating={handleTicketRating}
           onResolveConfirm={handleResolveConfirm}
         />
       </div>

@@ -4,7 +4,7 @@ import pytest
 
 from app.core.errors import AppError
 from app.core.time import utcnow
-from app.integrations import admin_mapping_client, queue_performance_client
+from app.integrations import admin_mapping_client, moengage_client, queue_performance_client
 from app.integrations.queue_performance_client import QueuePerformance
 from app.models.admin import Admin
 from app.models.enums import AdminRole, TicketStatus
@@ -237,6 +237,32 @@ def test_non_vip_no_visibility_ticket_still_uses_shared_channel(
     assert entry.channel != seeded_admin.slack_channel
 
 
+def test_a_moengage_failure_never_blocks_a_status_transition(db_session, seeded_astrologer, monkeypatch):
+    # _record_status is the one choke point for every ticket status write in
+    # the app — a bug or outage in the MoEngage event dispatch it now also
+    # does must never be able to take a real status transition down with it.
+    def _boom(*args, **kwargs):
+        raise RuntimeError("MoEngage is down")
+
+    monkeypatch.setattr(moengage_client, "send_ticket_status_event", _boom)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.IN_PROGRESS, changed_by="admin@test.example"
+    )
+
+    assert ticket.status == TicketStatus.IN_PROGRESS
+
+
 def test_status_always_mirrors_latest_history(db_session, seeded_astrologer):
     ticket = ticket_service.create_ticket(
         db_session,
@@ -249,7 +275,7 @@ def test_status_always_mirrors_latest_history(db_session, seeded_astrologer):
     )
 
     # CLOSED isn't in this loop — it's no longer a manually-settable status
-    # (see ADMIN_SETTABLE_STATUSES); only record_satisfaction/auto-close can
+    # (see ADMIN_SETTABLE_STATUSES); only record_ticket_rating/auto-close can
     # reach it now, covered by their own tests below.
     for status in (TicketStatus.UNDER_REVIEW, TicketStatus.IN_PROGRESS, TicketStatus.RESOLVED):
         note = "Fixed the issue" if status == TicketStatus.RESOLVED else None
@@ -260,25 +286,45 @@ def test_status_always_mirrors_latest_history(db_session, seeded_astrologer):
         assert ticket.history[-1].status == status
 
 
-def test_record_satisfaction_closes_ticket_when_satisfied(db_session, seeded_astrologer):
+def test_record_ticket_rating_closes_ticket_when_rating_is_high(db_session, seeded_astrologer):
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
 
-    ticket = ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
+    ticket = ticket_service.record_ticket_rating(
+        db_session, ticket, rating=5, reasons=["Quick response"], comment=None
+    )
+
+    assert ticket.status == TicketStatus.CLOSED
+    assert ticket.satisfaction == "satisfied"
+    assert ticket.rating == 5
+    assert ticket.rating_reasons == ["Quick response"]
+    assert ticket.rated_at is not None
+
+
+def test_record_ticket_rating_reopens_ticket_when_rating_is_low(db_session, seeded_astrologer):
+    ticket = _make_resolved_ticket(db_session, seeded_astrologer)
+
+    ticket = ticket_service.record_ticket_rating(
+        db_session, ticket, rating=2, reasons=["Took too long"], comment="Still broken"
+    )
+
+    assert ticket.status == TicketStatus.UNDER_REVIEW
+    assert ticket.satisfaction == "unsatisfied"
+    assert ticket.rating == 2
+    assert ticket.rating_comment == "Still broken"
+
+
+def test_record_ticket_rating_of_exactly_four_counts_as_satisfied(db_session, seeded_astrologer):
+    # The user-facing threshold is ">=4 stars" — 4 itself must close, not
+    # just 5, since the astrologer never sees "4 means unsatisfied".
+    ticket = _make_resolved_ticket(db_session, seeded_astrologer)
+
+    ticket = ticket_service.record_ticket_rating(db_session, ticket, rating=4, reasons=[], comment=None)
 
     assert ticket.status == TicketStatus.CLOSED
     assert ticket.satisfaction == "satisfied"
 
 
-def test_record_satisfaction_reopens_ticket_when_unsatisfied(db_session, seeded_astrologer):
-    ticket = _make_resolved_ticket(db_session, seeded_astrologer)
-
-    ticket = ticket_service.record_satisfaction(db_session, ticket, satisfied=False)
-
-    assert ticket.status == TicketStatus.UNDER_REVIEW
-    assert ticket.satisfaction == "unsatisfied"
-
-
-def test_record_satisfaction_rejects_ticket_not_awaiting_response(db_session, seeded_astrologer):
+def test_record_ticket_rating_rejects_ticket_not_awaiting_response(db_session, seeded_astrologer):
     ticket = ticket_service.create_ticket(
         db_session,
         astrologer_id=seeded_astrologer.id,
@@ -290,12 +336,14 @@ def test_record_satisfaction_rejects_ticket_not_awaiting_response(db_session, se
     )
 
     with pytest.raises(AppError):
-        ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
+        ticket_service.record_ticket_rating(db_session, ticket, rating=5, reasons=[], comment=None)
 
 
-def test_resolving_a_ticket_clears_any_earlier_satisfaction(db_session, seeded_astrologer):
+def test_resolving_a_ticket_clears_any_earlier_rating(db_session, seeded_astrologer):
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
-    ticket = ticket_service.record_satisfaction(db_session, ticket, satisfied=False)
+    ticket = ticket_service.record_ticket_rating(
+        db_session, ticket, rating=2, reasons=["Took too long"], comment="not fixed"
+    )
     assert ticket.satisfaction == "unsatisfied"
 
     ticket = ticket_service.transition_status(
@@ -303,6 +351,10 @@ def test_resolving_a_ticket_clears_any_earlier_satisfaction(db_session, seeded_a
     )
 
     assert ticket.satisfaction is None
+    assert ticket.rating is None
+    assert ticket.rating_reasons is None
+    assert ticket.rating_comment is None
+    assert ticket.rated_at is None
 
 
 def test_stale_resolved_ticket_auto_closes_after_48_hours(db_session, seeded_astrologer):
@@ -422,7 +474,7 @@ def test_get_active_ticket_for_category_ignores_resolved_and_closed(db_session, 
     ticket = _make_resolved_ticket(db_session, seeded_astrologer)
     # CLOSED is no longer a manually-settable status — reach it the same
     # way a real ticket does now, via the astrologer confirming it's fixed.
-    ticket_service.record_satisfaction(db_session, ticket, satisfied=True)
+    ticket_service.record_ticket_rating(db_session, ticket, rating=5, reasons=[], comment=None)
 
     found = ticket_service.get_active_ticket_for_category(
         db_session, seeded_astrologer.id, "technical"
@@ -652,7 +704,9 @@ def test_reassigning_a_resolved_ticket_does_not_reset_its_resolution(
     ticket = ticket_service.transition_status(
         db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it"
     )
-    ticket = ticket_service.record_satisfaction(db_session, ticket, satisfied=False)  # reopens to under_review
+    ticket = ticket_service.record_ticket_rating(
+        db_session, ticket, rating=2, reasons=[], comment=None
+    )  # reopens to under_review
     ticket = ticket_service.transition_status(
         db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it again"
     )
@@ -985,6 +1039,55 @@ def test_list_all_tickets_sort_priority_orders_most_urgent_first(db_session, see
     ordered_ids = [t.astrologer_id for t in results]
 
     assert ordered_ids.index(high.id) < ordered_ids.index(mid.id) < ordered_ids.index(low.id)
+
+
+def test_list_all_tickets_sort_priority_breaks_ties_oldest_first(
+    db_session, seeded_astrologer, monkeypatch
+):
+    from datetime import datetime
+
+    # Same astrologer -> same priority for both tickets, so this isolates
+    # the tie-break rule: within a priority tier, whoever's been waiting
+    # longest should surface first (not last, which is what a naive
+    # newest-first fetch before the stable sort would produce).
+    monkeypatch.setattr(
+        queue_performance_client,
+        "get_queue_performance",
+        lambda db, astrologer_id: QueuePerformance(
+            astrologer_id=astrologer_id,
+            priority=2,
+            users_connected=0,
+            queues_connected=0,
+            total_talktime_min=0,
+        ),
+    )
+
+    older = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="older issue",
+        description_en="older issue",
+        preferred_language="English",
+    )
+    older.created_at = datetime(2026, 8, 1)
+    newer = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="newer issue",
+        description_en="newer issue",
+        preferred_language="English",
+    )
+    newer.created_at = datetime(2026, 8, 10)
+    db_session.commit()
+
+    results = ticket_service.list_all_tickets(db_session, sort="priority")
+    ordered_ids = [t.id for t in results if t.id in (older.id, newer.id)]
+
+    assert ordered_ids == [older.id, newer.id]
 
 
 def test_list_all_tickets_sort_priority_places_unranked_last(db_session, seeded_admin, monkeypatch):

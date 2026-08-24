@@ -2,7 +2,9 @@ import { Link, useParams } from "react-router-dom";
 
 import { EmptyState } from "../../../components/EmptyState";
 import { Spinner } from "../../../components/Spinner";
+import { useSubmitTicketRating } from "../api/useSubmitTicketRating";
 import { useTicket } from "../api/useTicket";
+import { TicketRatingWidget } from "../components/TicketRatingWidget";
 import { TicketStatusBadge } from "../components/TicketStatusBadge";
 import { TicketTimeline } from "../components/TicketTimeline";
 
@@ -10,6 +12,7 @@ export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const ticketId = Number(id);
   const { data: ticket, status } = useTicket(ticketId);
+  const submitTicketRating = useSubmitTicketRating();
 
   return (
     <div className="flex h-full flex-col">
@@ -42,6 +45,28 @@ export function TicketDetailPage() {
               <p className="text-sm text-night/70">{ticket.description}</p>
             </div>
             <TicketTimeline ticket={ticket} />
+            {ticket.status === "resolved" && !ticket.satisfaction && (
+              // Shows regardless of how the astrologer got here — including
+              // landing directly on this route from a push notification —
+              // since it's driven entirely by the ticket's own state, not
+              // by any query param this page has to know about.
+              <TicketRatingWidget
+                ticketId={ticket.id}
+                onSubmit={(id, rating, reasons, comment) =>
+                  submitTicketRating.mutate({ id, rating, reasons, comment })
+                }
+              />
+            )}
+            {submitTicketRating.data?.id === ticket.id &&
+              submitTicketRating.data.status === "under_review" && (
+                <p className="text-sm text-night/60">
+                  We've reopened this ticket for another look.{" "}
+                  <Link to="/" className="font-medium text-terracotta underline">
+                    Open chat
+                  </Link>{" "}
+                  to tell us more.
+                </p>
+              )}
           </div>
         )}
       </div>

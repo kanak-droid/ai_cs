@@ -1,14 +1,21 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 
+const SIZE_CLASSES = {
+  md: "max-w-md",
+  lg: "max-w-2xl",
+} as const;
+
 export function Modal({
   title,
   onClose,
   children,
+  size = "md",
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  size?: keyof typeof SIZE_CLASSES;
 }) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -28,7 +35,7 @@ export function Modal({
         // closing it — only clicking the actual backdrop (or Escape/Cancel)
         // should dismiss the modal.
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl bg-white p-4 shadow-lg"
+        className={`w-full ${SIZE_CLASSES[size]} rounded-2xl bg-white p-4 shadow-lg`}
       >
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs font-medium uppercase tracking-wide text-night/40">{title}</p>
