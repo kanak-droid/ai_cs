@@ -69,3 +69,31 @@ def test_record_feedback_rejects_a_different_astrologers_session(db_session, see
     )
 
     assert result is None
+
+
+def test_get_transcript_text_formats_messages_in_order(db_session, seeded_astrologer):
+    session = chat_session_service.get_or_create_session(db_session, "sess-6", seeded_astrologer.id)
+    chat_session_service.record_message(db_session, session, role="astrologer", text="My payout is late")
+    chat_session_service.record_message(
+        db_session, session, role="assistant", text="Let me check that for you"
+    )
+
+    transcript = chat_session_service.get_transcript_text(db_session, "sess-6")
+
+    assert transcript == (
+        "Astrologer: My payout is late\n\nAssistant: Let me check that for you"
+    )
+
+
+def test_get_transcript_text_returns_none_without_a_session_id(db_session):
+    assert chat_session_service.get_transcript_text(db_session, None) is None
+
+
+def test_get_transcript_text_returns_none_for_an_unknown_session(db_session):
+    assert chat_session_service.get_transcript_text(db_session, "no-such-session") is None
+
+
+def test_get_transcript_text_returns_none_when_no_messages_were_recorded(db_session, seeded_astrologer):
+    chat_session_service.get_or_create_session(db_session, "sess-7", seeded_astrologer.id)
+
+    assert chat_session_service.get_transcript_text(db_session, "sess-7") is None

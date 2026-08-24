@@ -52,6 +52,22 @@ def mark_resolved_by_bot(
     db.flush()
 
 
+def get_transcript_text(db: Session, session_id: str | None) -> str | None:
+    """Formats a session's full persisted message history into readable
+    text — e.g. for a Zoho ticket comment carrying the complete astrologer/
+    bot conversation, not just the AI's short one-line description. None
+    if there's no session_id, no matching session, or no persisted
+    messages (older sessions predate ChatMessage — see its docstring).
+    """
+    if not session_id:
+        return None
+    session = db.query(ChatSession).filter_by(session_id=session_id).one_or_none()
+    if session is None or not session.messages:
+        return None
+    role_label = {"astrologer": "Astrologer", "assistant": "Assistant"}
+    return "\n\n".join(f"{role_label.get(m.role, m.role)}: {m.text}" for m in session.messages)
+
+
 def mark_escalated(db: Session, session_id: str | None, *, ticket_id: int) -> None:
     if not session_id:
         return

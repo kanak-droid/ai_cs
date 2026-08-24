@@ -27,9 +27,10 @@ import logging
 import time
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.integrations import object_storage
+from app.integrations import object_storage, queue_performance_client
 from app.models.ticket import Ticket
 
 logger = logging.getLogger(__name__)
@@ -132,12 +133,27 @@ def find_agent_id_by_email(email: str | None) -> str | None:
     return None
 
 
-def create_ticket(ticket: Ticket) -> str | None:
+def create_ticket(db: Session, ticket: Ticket) -> str | None:
     """Returns the new Zoho ticket id, or None if mocked or the real call
     failed — callers treat None as "not pushed", never as an error to
     surface to the astrologer/admin."""
     astrologer = ticket.astrologer
-    subject = f"[AstroHelp #{ticket.id}] {ticket.category} / {ticket.sub_category}"
+    # Same priority lookup/label convention as the Slack ticket-created
+    # notification (ticket_service.create_ticket) — lets a CS spot a VIP
+    # astrologer's ticket in the Zoho queue without opening it. Caught on
+    # its own, separate from the real-network try/except below — a
+    # priority-lookup failure must never abort ticket creation either.
+    try:
+        priority = queue_performance_client.get_queue_performance(db, ticket.astrologer_id).priority
+    except Exception:
+        logger.exception("Priority lookup failed for ticket #%s; using Unranked in Zoho subject", ticket.id)
+        priority = None
+    priority_label = f"P{priority}" if priority is not None else "Unranked"
+    # Leftmost so it's visible even when the ticket list truncates a long
+    # subject — priority is the most scannable thing for triage.
+    subject = (
+        f"({priority_label}) [AstroHelp #{ticket.id}] {ticket.category} / {ticket.sub_category}"
+    )
 
     if settings.ZOHO_MOCK_MODE:
         fake_id = f"mock-{ticket.id}"
@@ -167,6 +183,37 @@ def create_ticket(ticket: Ticket) -> str | None:
     except Exception:
         logger.exception("Zoho Desk ticket creation failed for AstroHelp ticket #%s", ticket.id)
         return None
+
+
+def post_comment(zoho_ticket_id: str, comment: str) -> None:
+    """Adds a comment to a Zoho ticket — used to carry the astrologer's
+    full chat transcript (see chat_session_service.get_transcript_text),
+    kept separate from the ticket's own short description. Posted as a
+    private/internal comment (isPublic=False) — the astrologer has no
+    Zoho customer portal login, so there's no audience for it to be
+    public toward; this is purely for whoever on the team works the
+    ticket. Best-effort, same as every other call here.
+
+    contentType is explicitly "plainText" — Zoho defaults new comments to
+    "html" if this is left out, which silently collapses our \\n\\n turn
+    breaks into one run-on paragraph (confirmed live 2026-08-24: HTML
+    ignores raw newlines). Declaring plainText makes Zoho render real line
+    breaks instead.
+    """
+    if settings.ZOHO_MOCK_MODE:
+        logger.info("[mock] Would post comment to Zoho Desk ticket %s: %s", zoho_ticket_id, comment)
+        return
+
+    try:
+        response = httpx.post(
+            f"{settings.ZOHO_API_DOMAIN}/api/v1/tickets/{zoho_ticket_id}/comments",
+            headers=_headers(),
+            json={"content": comment, "contentType": "plainText", "isPublic": False},
+            timeout=15.0,
+        )
+        response.raise_for_status()
+    except Exception:
+        logger.exception("Zoho Desk comment post failed for ticket %s", zoho_ticket_id)
 
 
 def upload_attachment(zoho_ticket_id: str, attachment_url: str) -> None:

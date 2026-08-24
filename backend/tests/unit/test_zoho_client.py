@@ -2,7 +2,8 @@ import httpx
 import pytest
 
 from app.core.config import settings
-from app.integrations import object_storage, zoho_client
+from app.integrations import object_storage, queue_performance_client, zoho_client
+from app.integrations.queue_performance_client import QueuePerformance
 from app.models.enums import TicketStatus
 from app.services import ticket_service
 
@@ -87,7 +88,7 @@ def test_mock_mode_never_calls_httpx(db_session, seeded_astrologer, monkeypatch)
 
     ticket = _make_ticket(db_session, seeded_astrologer)
 
-    zoho_id = zoho_client.create_ticket(ticket)
+    zoho_id = zoho_client.create_ticket(db_session, ticket)
     assert zoho_id is not None
     zoho_client.update_status(zoho_id, "Open")
 
@@ -104,7 +105,7 @@ def test_real_ticket_creation_failure_is_caught_not_raised(db_session, seeded_as
 
     # Must not raise — returns None instead, same "not pushed" signal as
     # any other failure (see the caller, ticket_service._maybe_push_to_zoho).
-    assert zoho_client.create_ticket(ticket) is None
+    assert zoho_client.create_ticket(db_session, ticket) is None
 
 
 def test_real_status_update_failure_is_caught_not_raised(monkeypatch):
@@ -172,7 +173,7 @@ def test_create_ticket_includes_assignee_when_an_agent_matches(db_session, seede
 
     monkeypatch.setattr(httpx, "post", _fake_post)
 
-    zoho_id = zoho_client.create_ticket(ticket)
+    zoho_id = zoho_client.create_ticket(db_session, ticket)
 
     assert zoho_id == "zoho-1"
     assert captured["json"]["assigneeId"] == "agent-42"
@@ -193,9 +194,96 @@ def test_create_ticket_omits_assignee_when_no_agent_matches(db_session, seeded_a
 
     monkeypatch.setattr(httpx, "post", _fake_post)
 
-    zoho_client.create_ticket(ticket)
+    zoho_client.create_ticket(db_session, ticket)
 
     assert "assigneeId" not in captured["json"]
+
+
+def test_create_ticket_includes_the_astrologers_priority_in_the_subject(
+    db_session, seeded_astrologer, monkeypatch
+):
+    monkeypatch.setattr(
+        queue_performance_client,
+        "get_queue_performance",
+        lambda db, astrologer_id: QueuePerformance(
+            astrologer_id=astrologer_id, priority=2, users_connected=0, queues_connected=0,
+            total_talktime_min=0,
+        ),
+    )
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+    monkeypatch.setattr(zoho_client, "find_agent_id_by_email", lambda email: None)
+
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return _FakeResponse({"id": "zoho-1"})
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    zoho_client.create_ticket(db_session, ticket)
+
+    assert captured["json"]["subject"].startswith("(P2)")
+
+
+def test_create_ticket_labels_unranked_astrologers_in_the_subject(
+    db_session, seeded_astrologer, monkeypatch
+):
+    monkeypatch.setattr(
+        queue_performance_client,
+        "get_queue_performance",
+        lambda db, astrologer_id: QueuePerformance(
+            astrologer_id=astrologer_id, priority=None, users_connected=0, queues_connected=0,
+            total_talktime_min=0,
+        ),
+    )
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+    monkeypatch.setattr(zoho_client, "find_agent_id_by_email", lambda email: None)
+
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return _FakeResponse({"id": "zoho-1"})
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    zoho_client.create_ticket(db_session, ticket)
+
+    assert captured["json"]["subject"].startswith("(Unranked)")
+
+
+def test_create_ticket_priority_lookup_failure_never_blocks_ticket_creation(
+    db_session, seeded_astrologer, monkeypatch
+):
+    ticket = _make_ticket(db_session, seeded_astrologer)
+
+    def _boom(db, astrologer_id):
+        raise RuntimeError("priority sheet is unreachable")
+
+    monkeypatch.setattr(queue_performance_client, "get_queue_performance", _boom)
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+    monkeypatch.setattr(zoho_client, "find_agent_id_by_email", lambda email: None)
+
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return _FakeResponse({"id": "zoho-1"})
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    zoho_id = zoho_client.create_ticket(db_session, ticket)
+
+    assert zoho_id == "zoho-1"
+    assert captured["json"]["subject"].startswith("(Unranked)")
 
 
 def test_upload_attachment_mock_mode_never_calls_httpx(monkeypatch):
@@ -245,3 +333,50 @@ def test_upload_attachment_failure_is_caught_not_raised(monkeypatch):
 
     # Must not raise.
     zoho_client.upload_attachment("zoho-1", "http://localhost:8000/uploads/photo.jpg")
+
+
+def test_post_comment_mock_mode_never_calls_httpx(monkeypatch):
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", True)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("httpx should never be called while ZOHO_MOCK_MODE is on")
+
+    monkeypatch.setattr(httpx, "post", _boom)
+
+    zoho_client.post_comment("zoho-1", "Astrologer: hi\n\nAssistant: hello")
+
+
+def test_post_comment_sends_the_transcript_as_a_private_comment(monkeypatch):
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+
+    captured = {}
+
+    def _fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return _FakeResponse({"id": "comment-1"})
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    zoho_client.post_comment("zoho-1", "Astrologer: hi\n\nAssistant: hello")
+
+    assert captured["url"] == "https://desk.zoho.in/api/v1/tickets/zoho-1/comments"
+    assert captured["json"] == {
+        "content": "Astrologer: hi\n\nAssistant: hello",
+        "contentType": "plainText",
+        "isPublic": False,
+    }
+
+
+def test_post_comment_failure_is_caught_not_raised(monkeypatch):
+    monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", False)
+    monkeypatch.setattr(zoho_client, "_get_access_token", lambda: "fake-token")
+
+    def _boom(*args, **kwargs):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", _boom)
+
+    # Must not raise.
+    zoho_client.post_comment("zoho-1", "some transcript")

@@ -1,7 +1,7 @@
 from app.integrations import zoho_client
 from app.models.admin import Admin
 from app.models.enums import AdminRole, TicketStatus
-from app.services import ticket_service
+from app.services import chat_session_service, ticket_service
 
 
 def test_create_ticket_pushes_cs_notified_tickets_to_zoho(db_session, seeded_astrologer):
@@ -279,3 +279,98 @@ def test_a_zoho_assignee_update_failure_never_blocks_reassignment(
     )
 
     assert ticket.assigned_cs_id == new_cs.id
+
+
+def test_sync_chat_transcript_posts_the_full_conversation(db_session, seeded_astrologer, monkeypatch):
+    session = chat_session_service.get_or_create_session(db_session, "sess-zoho-1", seeded_astrologer.id)
+    chat_session_service.record_message(db_session, session, role="astrologer", text="My payout is late")
+    chat_session_service.record_message(db_session, session, role="assistant", text="Let me check")
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        zoho_client, "post_comment", lambda zoho_id, comment: calls.append((zoho_id, comment))
+    )
+
+    ticket_service.sync_chat_transcript_to_zoho(db_session, ticket, "sess-zoho-1")
+
+    assert calls == [
+        (ticket.zoho_ticket_id, "Astrologer: My payout is late\n\nAssistant: Let me check")
+    ]
+
+
+def test_sync_chat_transcript_does_nothing_when_ticket_was_never_pushed(
+    db_session, seeded_astrologer, monkeypatch
+):
+    session = chat_session_service.get_or_create_session(db_session, "sess-zoho-2", seeded_astrologer.id)
+    chat_session_service.record_message(db_session, session, role="astrologer", text="Photo change")
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="profile",
+        sub_category="photo_change",
+        description="new photo",
+        description_en="new photo",
+        preferred_language="English",
+    )
+    assert ticket.zoho_ticket_id is None
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("post_comment should never be called for a ticket never pushed to Zoho")
+
+    monkeypatch.setattr(zoho_client, "post_comment", _boom)
+
+    ticket_service.sync_chat_transcript_to_zoho(db_session, ticket, "sess-zoho-2")
+
+
+def test_sync_chat_transcript_does_nothing_without_a_transcript(db_session, seeded_astrologer, monkeypatch):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("post_comment should never be called with no transcript")
+
+    monkeypatch.setattr(zoho_client, "post_comment", _boom)
+
+    # No session_id at all — e.g. a direct executor call in tests.
+    ticket_service.sync_chat_transcript_to_zoho(db_session, ticket, None)
+
+
+def test_a_zoho_transcript_post_failure_never_raises(db_session, seeded_astrologer, monkeypatch):
+    session = chat_session_service.get_or_create_session(db_session, "sess-zoho-3", seeded_astrologer.id)
+    chat_session_service.record_message(db_session, session, role="astrologer", text="Help")
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Zoho is down")
+
+    monkeypatch.setattr(zoho_client, "post_comment", _boom)
+
+    # Must not raise.
+    ticket_service.sync_chat_transcript_to_zoho(db_session, ticket, "sess-zoho-3")

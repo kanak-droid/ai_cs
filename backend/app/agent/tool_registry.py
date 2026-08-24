@@ -252,6 +252,7 @@ def _handle_create_support_ticket(tool_input: dict, ctx: SessionContext) -> Tool
         attachment_url=attachment_url,
     )
     chat_session_service.mark_escalated(ctx.db, ctx.session_id, ticket_id=ticket.id)
+    ticket_service.sync_chat_transcript_to_zoho(ctx.db, ticket, ctx.session_id)
     ticket_read = TicketRead.model_validate(ticket)
 
     # Real name of whoever was ACTUALLY notified (kam_notified/cs_notified —

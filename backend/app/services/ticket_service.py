@@ -28,6 +28,7 @@ from app.models.astrologer import Astrologer
 from app.models.enums import ADMIN_SETTABLE_STATUSES, AdminRole, TicketStatus
 from app.models.ticket import Ticket
 from app.models.ticket_status_history import TicketStatusHistory
+from app.services import chat_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def _maybe_push_to_zoho(db: Session, ticket: Ticket) -> None:
     if ticket.zoho_ticket_id is not None or not ticket.cs_notified:
         return
     try:
-        ticket.zoho_ticket_id = zoho_client.create_ticket(ticket)
+        ticket.zoho_ticket_id = zoho_client.create_ticket(db, ticket)
     except Exception:
         logger.exception("Zoho Desk ticket creation raised unexpectedly for ticket #%s", ticket.id)
         return
@@ -195,6 +196,29 @@ def _maybe_push_to_zoho(db: Session, ticket: Ticket) -> None:
             zoho_client.upload_attachment(ticket.zoho_ticket_id, ticket.attachment_url)
         except Exception:
             logger.exception("Zoho Desk attachment upload raised unexpectedly for ticket #%s", ticket.id)
+
+
+def sync_chat_transcript_to_zoho(db: Session, ticket: Ticket, session_id: str | None) -> None:
+    """Posts the astrologer's full chat transcript (see
+    chat_session_service.get_transcript_text) as a Zoho ticket comment —
+    separate from the ticket's own short AI-written description, so
+    whoever works the ticket has the complete back-and-forth one click
+    away. Called by the tool handler right after create_ticket AND
+    chat_session_service.mark_escalated both return (the ChatSession ->
+    Ticket link isn't set until mark_escalated runs, and this doesn't
+    strictly need it anyway — session_id alone is enough to find the
+    messages). No-ops if the ticket was never pushed to Zoho, or there's
+    no transcript to send. Best-effort, same as every other Zoho call.
+    """
+    if ticket.zoho_ticket_id is None:
+        return
+    transcript = chat_session_service.get_transcript_text(db, session_id)
+    if not transcript:
+        return
+    try:
+        zoho_client.post_comment(ticket.zoho_ticket_id, transcript)
+    except Exception:
+        logger.exception("Zoho Desk transcript post raised unexpectedly for ticket #%s", ticket.id)
 
 
 def _log_note(db: Session, ticket: Ticket, *, changed_by: str, note: str) -> None:
