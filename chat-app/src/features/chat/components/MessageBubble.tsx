@@ -25,7 +25,7 @@ export function MessageBubble({
 }: {
   message: DisplayMessage;
   showResolvePrompt: boolean;
-  onFeedbackSubmit: (rating: number, comment: string) => void;
+  onFeedbackSubmit: (rating: number, reasons: string[], comment: string) => void;
   onTicketRating: (ticketId: number, rating: number, reasons: string[], comment: string | null) => void;
   onResolveConfirm: () => void;
 }) {

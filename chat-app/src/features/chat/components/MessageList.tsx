@@ -15,7 +15,7 @@ export function MessageList({
   messages: DisplayMessage[];
   isWaitingForReply: boolean;
   chatClosed: boolean;
-  onFeedbackSubmit: (messageId: string, rating: number, comment: string) => void;
+  onFeedbackSubmit: (messageId: string, rating: number, reasons: string[], comment: string) => void;
   onTicketRating: (
     messageId: string,
     ticketId: number,
@@ -50,7 +50,9 @@ export function MessageList({
             message.id !== "welcome" &&
             message.id === lastMessageId
           }
-          onFeedbackSubmit={(rating, comment) => onFeedbackSubmit(message.id, rating, comment)}
+          onFeedbackSubmit={(rating, reasons, comment) =>
+            onFeedbackSubmit(message.id, rating, reasons, comment)
+          }
           onTicketRating={(ticketId, rating, reasons, comment) =>
             onTicketRating(message.id, ticketId, rating, reasons, comment)
           }

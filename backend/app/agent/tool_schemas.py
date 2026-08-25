@@ -119,7 +119,14 @@ CREATE_SUPPORT_TICKET = {
                     "up / getting bookings/visibility they expect), 'resignation' (astrologer "
                     "wants to leave/quit the platform), 'referral_amount' (astrologer asking "
                     "about a referral bonus/payout they're owed for referring another "
-                    "astrologer), or 'other'."
+                    "astrologer), 'pooja_payment_link' (astrologer needs a payment link set up "
+                    "for a pooja/ritual booking), 'price_change' (astrologer wants their per-"
+                    "minute/consultation price changed), 'user_bad_behaviour' (astrologer "
+                    "reporting a user's bad behavior during a session), 'language_change' "
+                    "(astrologer wants to change/add a language they serve users in), "
+                    "'mock_test_status' (astrologer asking about their mock test/certification "
+                    "status), 'interview_status' (astrologer asking about their interview/ "
+                    "onboarding status), or 'other'."
                 ),
             },
             "sub_category": {

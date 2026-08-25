@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import utcnow
@@ -40,6 +40,10 @@ class ChatSession(Base):
 
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     feedback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Preset reason chips the astrologer tapped alongside the rating — same
+    # idea as Ticket.rating_reasons, just for the bot-conversation rating
+    # rather than a ticket's resolution.
+    feedback_reasons: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     started_at: Mapped[datetime] = mapped_column(default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)

@@ -69,19 +69,44 @@ _VIP_PRIORITY_MAX = 2
 # "phone_change"/"payout"/"kyc" used to still tag the KAM as notified for a
 # VIP astrologer even though they were never treated as direct-to-KAM
 # categories. All now unified under the same CS-first routing.
-_CS_ONLY_CATEGORIES = {"technical", "no_visibility", "profile", "phone_change", "payout", "kyc"}
+_CS_ONLY_CATEGORIES = {
+    "technical",
+    "no_visibility",
+    "profile",
+    "phone_change",
+    "payout",
+    "kyc",
+    "user_bad_behaviour",
+    "language_change",
+    "mock_test_status",
+    "interview_status",
+}
 
-# "Referral amount" (an astrologer chasing a referral bonus they're owed)
-# always goes straight to their KAM, CS never looped in at all, regardless
-# of priority — same exclusivity "profile" used to have before the
-# 2026-08-25 change, just for a different category.
-_ALWAYS_KAM_ONLY_CATEGORIES = {"referral_amount"}
+# Always go straight to their KAM, CS never looped in at all, regardless of
+# priority — same exclusivity "profile" used to have before the 2026-08-25
+# change, just for these categories. "referral_amount" (a referral bonus
+# owed) and "pooja_payment_link"/"price_change" (KAM-managed payment/pricing
+# setup) all fit the same shape.
+_ALWAYS_KAM_ONLY_CATEGORIES = {"referral_amount", "pooja_payment_link", "price_change"}
 
 # "Resignation" is the one category with its own, wider priority cutoff —
 # P1-P3 (not just P1/P2 like _VIP_PRIORITY_MAX elsewhere) go straight to the
 # KAM, CS excluded entirely; P4/P5 or unranked go to CS instead, KAM
 # excluded. Never both at once, unlike the general is_vip cc pattern below.
 _RESIGNATION_KAM_PRIORITY_MAX = 3
+
+# Human-readable reason shown in the "*Routed directly to X as their KAM
+# (...)*" Slack message for every category that can reach that branch (see
+# create_ticket) — anything not listed here falls back to its own
+# underscore-stripped category name, so a future addition to
+# _ALWAYS_KAM_ONLY_CATEGORIES never silently mislabels itself as one of
+# these.
+_KAM_ONLY_REASON_LABELS = {
+    "referral_amount": "referral amount request",
+    "pooja_payment_link": "pooja payment link request",
+    "price_change": "price change request",
+    "resignation": "resignation",
+}
 
 
 def _team_for_category(category: str) -> str:
@@ -209,8 +234,15 @@ def _record_status(
 
     # Same reasoning, same belt-and-suspenders wrapping — keep an already-
     # pushed Zoho Desk ticket's status in sync. No-ops (inside zoho_client)
-    # for a ticket that was never pushed (zoho_ticket_id is None).
-    if ticket.zoho_ticket_id is not None:
+    # for a ticket that was never pushed (zoho_ticket_id is None). Skipped
+    # entirely when the change came FROM Zoho in the first place
+    # (changed_by="zoho", set by the webhook route) — writing it straight
+    # back would be a pointless round-trip at best, and actively wrong at
+    # worst: our status enum is coarser than Zoho's (e.g. "On Hold" and
+    # "Open" both collapse to our single in_progress/open bucket), so
+    # syncing back after an On Hold pull would immediately flip the ticket
+    # back to "Open" in Zoho, undoing the very edit that triggered this.
+    if ticket.zoho_ticket_id is not None and changed_by != "zoho":
         try:
             zoho_client.update_status(ticket.zoho_ticket_id, zoho_client.zoho_status_for(ticket))
         except Exception:
@@ -375,9 +407,9 @@ def create_ticket(
     # branch's history).
     if kam_notified and not cs_notified:
         # Genuinely KAM-owned, CS excluded entirely — only
-        # _ALWAYS_KAM_ONLY_CATEGORIES ("referral_amount", always) or
-        # "resignation" at P1-P3 ever reach this, per routing_for_ticket.
-        reason = "referral amount request" if normalized_category == "referral_amount" else "resignation"
+        # _ALWAYS_KAM_ONLY_CATEGORIES (always) or "resignation" at P1-P3
+        # ever reach this, per routing_for_ticket.
+        reason = _KAM_ONLY_REASON_LABELS.get(normalized_category, normalized_category.replace("_", " "))
         text = (
             f"{header}\n{body}\n*Routed directly to {_slack_mention(admin, kam_name)} "
             f"as their KAM ({reason}).*"

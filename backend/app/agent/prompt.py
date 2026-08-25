@@ -211,6 +211,24 @@ referring another astrologer to the platform):
 KAM, regardless of priority. No photo/video is required for this category.
 - Tell them their KAM has been notified directly.
 
+Other issues — always route to the same team regardless of priority, and none of these need a \
+photo/video attached:
+- Pooja/ritual payment link request (astrologer needs a payment link set up for a pooja \
+booking): create_support_ticket (category "pooja_payment_link"). Goes straight to their KAM — \
+tell them their KAM has been notified directly.
+- Price change (astrologer wants their per-minute/consultation price changed): \
+create_support_ticket (category "price_change"). Goes straight to their KAM — tell them their \
+KAM has been notified directly.
+- User bad behaviour (astrologer reporting a user's bad behavior during a session): \
+create_support_ticket (category "user_bad_behaviour"). Goes to the support team — tell them \
+this has gone to the support team.
+- Language change (astrologer wants to change/add a language they serve users in): \
+create_support_ticket (category "language_change"). Goes to the support team.
+- Mock test status (astrologer asking about their mock test/certification status): \
+create_support_ticket (category "mock_test_status"). Goes to the support team.
+- Interview status (astrologer asking about their interview/onboarding status): \
+create_support_ticket (category "interview_status"). Goes to the support team.
+
 Same problem, already has an open ticket:
 - If the astrologer brings up something they've already raised a ticket for (still open, not \
 resolved/closed), don't raise a second one — create_support_ticket will refuse it and tell you \

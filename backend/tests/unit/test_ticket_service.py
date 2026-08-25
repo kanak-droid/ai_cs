@@ -268,6 +268,66 @@ def test_resignation_ticket_routes_to_kam_at_p1_to_p3(
     assert "*CS:*" not in entry.message
 
 
+@pytest.mark.parametrize(
+    "category,sub_category,reason_text",
+    [
+        ("pooja_payment_link", "pooja_link_needed", "pooja payment link request"),
+        ("price_change", "wants_lower_price", "price change request"),
+    ],
+)
+@pytest.mark.parametrize("priority", [1, 5, None])
+def test_pooja_payment_link_and_price_change_are_always_kam_only(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch, priority, category, sub_category, reason_text
+):
+    # Same exclusivity as referral_amount — always the KAM's, CS never
+    # looped in, regardless of priority.
+    _force_priority(monkeypatch, priority=priority)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category=category,
+        sub_category=sub_category,
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is True
+    assert ticket.cs_notified is False
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert f"as their KAM ({reason_text})" in entry.message
+    assert "*CS:*" not in entry.message
+
+
+@pytest.mark.parametrize(
+    "category,sub_category",
+    [
+        ("user_bad_behaviour", "abusive_user"),
+        ("language_change", "add_telugu"),
+        ("mock_test_status", "status_check"),
+        ("interview_status", "status_check"),
+    ],
+)
+def test_new_other_issues_categories_are_cs_only_even_for_a_vip_astrologer(
+    db_session, seeded_astrologer, monkeypatch, category, sub_category
+):
+    _force_priority(monkeypatch, priority=1)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category=category,
+        sub_category=sub_category,
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is False
+    assert ticket.cs_notified is True
+
+
 @pytest.mark.parametrize("priority", [4, 5, None])
 def test_resignation_ticket_routes_to_cs_at_p4_p5_or_unranked(
     db_session, seeded_astrologer, seeded_admin, monkeypatch, priority

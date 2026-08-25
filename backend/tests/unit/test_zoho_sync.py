@@ -171,6 +171,39 @@ def test_a_zoho_failure_never_blocks_a_status_transition(db_session, seeded_astr
     assert ticket.status == TicketStatus.IN_PROGRESS
 
 
+def test_a_status_change_that_came_from_zoho_is_not_synced_back_to_zoho(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # Regression test: a status pulled FROM Zoho (changed_by="zoho", set by
+    # the webhook route) must never be pushed straight back — our status
+    # enum is coarser than Zoho's (in_progress collapses to "Open" in
+    # zoho_status_for), so syncing back after e.g. an "On Hold" pull would
+    # immediately flip the ticket back to "Open" in Zoho, undoing the very
+    # edit that triggered the webhook in the first place. Confirmed live
+    # 2026-08-25 — this exact loop was observed in the real Zoho instance.
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    assert ticket.zoho_ticket_id is not None
+
+    calls = []
+    monkeypatch.setattr(
+        zoho_client, "update_status", lambda zoho_id, status: calls.append((zoho_id, status))
+    )
+
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.IN_PROGRESS, changed_by="zoho", note="Waiting on tech team"
+    )
+
+    assert calls == []
+
+
 def test_escalating_pushes_escalated_status_to_zoho(db_session, seeded_astrologer, monkeypatch):
     ticket = ticket_service.create_ticket(
         db_session,

@@ -42,4 +42,5 @@ class ChatResponse(BaseModel):
 
 class SessionFeedbackRequest(BaseModel):
     rating: int = Field(ge=1, le=5)
+    reasons: list[str] = Field(default_factory=list)
     comment: str | None = None

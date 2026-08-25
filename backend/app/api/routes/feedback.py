@@ -18,7 +18,12 @@ def submit_session_feedback(
     db: Session = Depends(get_db),
 ) -> dict:
     session = chat_session_service.record_feedback(
-        db, session_id, astrologer.astrologer_id, rating=body.rating, comment=body.comment
+        db,
+        session_id,
+        astrologer.astrologer_id,
+        rating=body.rating,
+        reasons=body.reasons,
+        comment=body.comment,
     )
     if session is None:
         raise NotFoundError("Chat session not found")

@@ -37,14 +37,11 @@ export function TicketRatingWidget({
   // >=4 stars mirrors the backend's own satisfied/unsatisfied threshold
   // (see ticket_service.record_ticket_rating) — keep the two in sync.
   const reasonOptions = rating >= 4 ? POSITIVE_REASONS : NEGATIVE_REASONS;
-  // Below 4 stars means something wasn't quite right — require at least a
-  // reason chip or a typed comment so it's never submitted with zero
-  // context on what went wrong. Matches the same >=4 threshold the reason
-  // list itself already switches on, and the backend's satisfied cutoff
-  // (see ticket_service.record_ticket_rating).
-  const justificationRequired = rating > 0 && rating < 4;
+  // A reason chip or a typed comment is always required, at every rating —
+  // feedback with zero context (not even "what did you like") isn't useful
+  // enough to accept on its own.
   const hasJustification = reasons.length > 0 || comment.trim().length > 0;
-  const canSubmit = rating > 0 && (!justificationRequired || hasJustification);
+  const canSubmit = rating > 0 && hasJustification;
 
   return (
     <div className="rounded-2xl bg-white p-3 shadow-sm">
@@ -71,10 +68,8 @@ export function TicketRatingWidget({
         <>
           <p className="mb-1.5 mt-3 text-xs font-medium text-night/60">
             {rating >= 4
-              ? "What did you like? (optional)"
-              : justificationRequired
-                ? "What went wrong? (pick one or tell us below)"
-                : "What went wrong? (optional)"}
+              ? "What did you like? (pick one or tell us below)"
+              : "What went wrong? (pick one or tell us below)"}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {reasonOptions.map((reason) => {
@@ -98,9 +93,7 @@ export function TicketRatingWidget({
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder={
-              justificationRequired ? "Tell us what went wrong" : "Anything else? (optional)"
-            }
+            placeholder={rating >= 4 ? "Tell us what you liked" : "Tell us what went wrong"}
             rows={2}
             className="mt-2 w-full resize-none rounded-lg border border-night/15 bg-cream px-3 py-2 text-sm text-ink placeholder:text-night/40 focus-visible:border-terracotta"
           />

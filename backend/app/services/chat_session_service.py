@@ -81,7 +81,13 @@ def mark_escalated(db: Session, session_id: str | None, *, ticket_id: int) -> No
 
 
 def record_feedback(
-    db: Session, session_id: str, astrologer_id: int, *, rating: int, comment: str | None
+    db: Session,
+    session_id: str,
+    astrologer_id: int,
+    *,
+    rating: int,
+    reasons: list[str] | None = None,
+    comment: str | None,
 ) -> ChatSession | None:
     session = (
         db.query(ChatSession)
@@ -91,6 +97,7 @@ def record_feedback(
     if session is None:
         return None
     session.rating = rating
+    session.feedback_reasons = reasons
     session.feedback_text = comment
     db.commit()
     db.refresh(session)

@@ -53,11 +53,17 @@ def test_record_feedback_stores_rating_and_comment_for_the_owning_astrologer(
     chat_session_service.get_or_create_session(db_session, "sess-4", seeded_astrologer.id)
 
     session = chat_session_service.record_feedback(
-        db_session, "sess-4", seeded_astrologer.id, rating=5, comment="Fixed it fast!"
+        db_session,
+        "sess-4",
+        seeded_astrologer.id,
+        rating=5,
+        reasons=["Quick response"],
+        comment="Fixed it fast!",
     )
 
     assert session is not None
     assert session.rating == 5
+    assert session.feedback_reasons == ["Quick response"]
     assert session.feedback_text == "Fixed it fast!"
 
 

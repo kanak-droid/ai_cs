@@ -330,11 +330,11 @@ export function ChatPage() {
     }
   }
 
-  function handleFeedbackSubmit(messageId: string, rating: number, comment: string) {
+  function handleFeedbackSubmit(messageId: string, rating: number, reasons: string[], comment: string) {
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, feedbackSubmitted: true } : m)),
     );
-    submitSessionFeedback(sessionId, rating, comment || null).catch(() => {
+    submitSessionFeedback(sessionId, rating, reasons, comment || null).catch(() => {
       // Best-effort analytics — a failed submit shouldn't block or confuse the chat.
     });
   }
