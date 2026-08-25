@@ -79,9 +79,11 @@ def test_a_zoho_attachment_upload_failure_never_blocks_ticket_creation(
     assert ticket.zoho_ticket_id is not None
 
 
-def test_create_ticket_does_not_push_profile_category_tickets(db_session, seeded_astrologer):
-    # "profile" (photo change) never loops in a CS at all — see
-    # _ALWAYS_DIRECT_TO_KAM_CATEGORIES — so it should never reach Zoho either.
+def test_create_ticket_pushes_profile_category_tickets_too(db_session, seeded_astrologer):
+    # 2026-08-25 policy change: "profile" (photo change) used to never loop
+    # in a CS at all, so it never reached Zoho either. It's now CS-only
+    # like every other category (see ticket_service._CS_ONLY_CATEGORIES),
+    # so it gets pushed just like anything else.
     ticket = ticket_service.create_ticket(
         db_session,
         astrologer_id=seeded_astrologer.id,
@@ -92,8 +94,8 @@ def test_create_ticket_does_not_push_profile_category_tickets(db_session, seeded
         preferred_language="English",
     )
 
-    assert ticket.cs_notified is False
-    assert ticket.zoho_ticket_id is None
+    assert ticket.cs_notified is True
+    assert ticket.zoho_ticket_id is not None
 
 
 def test_reassigning_to_a_cs_pushes_a_not_yet_pushed_ticket(db_session, seeded_astrologer):
@@ -104,13 +106,18 @@ def test_reassigning_to_a_cs_pushes_a_not_yet_pushed_ticket(db_session, seeded_a
     ticket = ticket_service.create_ticket(
         db_session,
         astrologer_id=seeded_astrologer.id,
-        category="profile",
-        sub_category="photo_change",
-        description="new photo",
-        description_en="new photo",
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
         preferred_language="English",
     )
-    assert ticket.zoho_ticket_id is None
+    # Every category loops in a CS at creation now, so simulate the case
+    # this branch actually still guards against: a legacy ticket from
+    # before that was true, or one whose initial push simply failed.
+    ticket.cs_notified = False
+    ticket.zoho_ticket_id = None
+    db_session.commit()
 
     ticket = ticket_service.reassign_ticket(
         db_session, ticket, role="cs", new_admin_id=cs_admin.id, changed_by="admin@test.example"
@@ -323,7 +330,11 @@ def test_sync_chat_transcript_does_nothing_when_ticket_was_never_pushed(
         description_en="new photo",
         preferred_language="English",
     )
-    assert ticket.zoho_ticket_id is None
+    # Every category loops in a CS (and so gets pushed) at creation now —
+    # simulate a ticket whose initial push simply failed, still a real case
+    # sync_chat_transcript_to_zoho has to guard against.
+    ticket.zoho_ticket_id = None
+    db_session.commit()
 
     def _boom(*args, **kwargs):
         raise AssertionError("post_comment should never be called for a ticket never pushed to Zoho")
@@ -402,12 +413,18 @@ def test_backfill_push_to_zoho_returns_false_when_not_cs_notified(db_session, se
     ticket = ticket_service.create_ticket(
         db_session,
         astrologer_id=seeded_astrologer.id,
-        category="profile",
-        sub_category="photo_change",
-        description="new photo",
-        description_en="new photo",
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
         preferred_language="English",
     )
+    # Every category loops in a CS at creation now — simulate a legacy
+    # ticket from before that was true, which backfill_push_to_zoho (a
+    # one-off migration helper) exists specifically to handle.
+    ticket.cs_notified = False
+    ticket.zoho_ticket_id = None
+    db_session.commit()
 
     pushed = ticket_service.backfill_push_to_zoho(db_session, ticket)
 

@@ -414,24 +414,26 @@ def test_create_support_ticket_allows_a_new_ticket_after_the_first_resolves(
 def test_create_support_ticket_names_the_kam_when_actually_notified(
     db_session, seeded_astrologer, monkeypatch
 ):
-    # "profile" (photo change) always routes direct-to-KAM regardless of
-    # priority — the model should get the real KAM name back, not just an id.
-    _force_priority(monkeypatch, priority=5)
+    # A VIP astrologer on a category with no CS-only carve-out (e.g.
+    # "other" — see ticket_service._CS_ONLY_CATEGORIES) is the one case
+    # that still actually notifies the KAM — the model should get the real
+    # KAM name back, not just an id.
+    _force_priority(monkeypatch, priority=1)
     ctx = SessionContext(
         astrologer_id=seeded_astrologer.id,
         name="Test",
         language="English",
         db=db_session,
-        last_attachment_url="https://x.example/photo.png",
+        last_attachment_url="https://x.example/screenshot.png",
     )
 
     result = executor.execute(
         "create_support_ticket",
         {
-            "category": "profile",
-            "sub_category": "photo_change",
-            "description": "Wants a new profile photo.",
-            "description_en": "Wants a new profile photo.",
+            "category": "other",
+            "sub_category": "general",
+            "description": "Something else entirely.",
+            "description_en": "Something else entirely.",
         },
         ctx,
     )

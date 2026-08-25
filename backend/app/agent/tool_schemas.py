@@ -116,7 +116,10 @@ CREATE_SUPPORT_TICKET = {
                     "Broad issue category: 'payout', 'kyc', 'profile' (photo change), "
                     "'technical', 'phone_change' (astrologer wants their registered phone "
                     "number changed), 'no_visibility' (astrologer says they aren't showing "
-                    "up / getting bookings/visibility they expect), or 'other'."
+                    "up / getting bookings/visibility they expect), 'resignation' (astrologer "
+                    "wants to leave/quit the platform), 'referral_amount' (astrologer asking "
+                    "about a referral bonus/payout they're owed for referring another "
+                    "astrologer), or 'other'."
                 ),
             },
             "sub_category": {

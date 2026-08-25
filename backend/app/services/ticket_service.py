@@ -49,40 +49,82 @@ _TECH_CATEGORIES = {"technical", "other"}
 _TEAM_EMOJI = {"tech": "🛠️", "business": "💼"}
 
 # Priority 1/2 astrologers ("P1"/"P2") get white-glove routing — their KAM is
-# pulled in directly rather than just cc'd in the shared channel. Everyone
+# cc'd directly in the Slack notification rather than staying silent. Everyone
 # else (P3+, or unknown/unlinked) goes through the standard CS flow. Uses the
 # same queue_performance_client the get_priority_ranking tool uses (mock
 # fallback included) so a ticket's routing never disagrees with whatever
 # priority the model already told the astrologer in chat.
 _VIP_PRIORITY_MAX = 2
 
-# "No Visibility" routes straight to the KAM's own Slack channel instead of
-# the shared CS one, but only for VIP (P1/P2) astrologers — P3+ goes through
-# CS first (see prompt.py's "No Visibility" section).
-_VIP_DIRECT_TO_KAM_CATEGORIES = {"no_visibility"}
-# "Photo Change" (category "profile") always goes straight to the KAM,
-# regardless of priority — the policy for this category carves out no P1/P2
-# exception, unlike "no_visibility" above. CS isn't looped in at all for it.
-_ALWAYS_DIRECT_TO_KAM_CATEGORIES = {"profile"}
+# Categories a CS always owns at creation, regardless of priority — the
+# astrologer's personal KAM still gets set as assigned_admin_id (so their
+# name shows in the dashboard like any other ticket) and, for a VIP
+# astrologer, still gets @mentioned in the Slack notification for
+# visibility, but the ticket never counts as kam_notified ("in their name")
+# until a CS actually escalates it (see escalate_to_kam) — that's the only
+# path back to a KAM for these categories now. 2026-08-25 policy change:
+# "no_visibility" and "profile" used to route straight to the KAM's own
+# Slack channel instead of through CS (the former only for VIP, the latter
+# always, with CS never looped in at all for it); "technical"/
+# "phone_change"/"payout"/"kyc" used to still tag the KAM as notified for a
+# VIP astrologer even though they were never treated as direct-to-KAM
+# categories. All now unified under the same CS-first routing.
+_CS_ONLY_CATEGORIES = {"technical", "no_visibility", "profile", "phone_change", "payout", "kyc"}
+
+# "Referral amount" (an astrologer chasing a referral bonus they're owed)
+# always goes straight to their KAM, CS never looped in at all, regardless
+# of priority — same exclusivity "profile" used to have before the
+# 2026-08-25 change, just for a different category.
+_ALWAYS_KAM_ONLY_CATEGORIES = {"referral_amount"}
+
+# "Resignation" is the one category with its own, wider priority cutoff —
+# P1-P3 (not just P1/P2 like _VIP_PRIORITY_MAX elsewhere) go straight to the
+# KAM, CS excluded entirely; P4/P5 or unranked go to CS instead, KAM
+# excluded. Never both at once, unlike the general is_vip cc pattern below.
+_RESIGNATION_KAM_PRIORITY_MAX = 3
 
 
 def _team_for_category(category: str) -> str:
     return "tech" if category.strip().lower() in _TECH_CATEGORIES else "business"
 
 
-def routing_for_ticket(category: str, is_vip: bool) -> tuple[bool, bool, bool]:
-    """(direct_to_kam, kam_notified, cs_notified) for a ticket with this
-    category/VIP-ness — the single source of truth create_ticket's Slack
-    branch and scripts/backfill_ticket_notified.py both use, so the stored
-    flags can never drift from the actual routing decision."""
-    always_direct = category.strip().lower() in _ALWAYS_DIRECT_TO_KAM_CATEGORIES
-    vip_direct = is_vip and category.strip().lower() in _VIP_DIRECT_TO_KAM_CATEGORIES
-    direct_to_kam = always_direct or vip_direct
-    return direct_to_kam, (direct_to_kam or is_vip), (not always_direct)
+def astrologer_priority(db: Session, astrologer_id: int) -> int | None:
+    return queue_performance_client.get_queue_performance(db, astrologer_id).priority
+
+
+def routing_for_ticket(category: str, priority: int | None) -> tuple[bool, bool]:
+    """(kam_notified, cs_notified) for a ticket with this category/
+    priority — the single source of truth create_ticket and
+    scripts/backfill_ticket_notified.py both use, so the stored flags can
+    never drift from the actual routing decision.
+
+    Three shapes, depending on category:
+    - _ALWAYS_KAM_ONLY_CATEGORIES ("referral_amount"): always (True, False)
+      — KAM owns it, CS excluded, regardless of priority.
+    - "resignation": mutually exclusive by its own priority cutoff — P1-P3
+      is (True, False) (KAM owns it, CS excluded), P4/P5/unranked is
+      (False, True) (CS owns it, KAM excluded).
+    - Everything else: cs_notified is unconditionally True (every other
+      category loops in a CS at creation) and kam_notified is True for a
+      VIP astrologer (P1/P2) UNLESS the category is in
+      _CS_ONLY_CATEGORIES, which never notifies the KAM at creation
+      regardless of priority — only escalate_to_kam can do that for those.
+    """
+    normalized = category.strip().lower()
+    is_vip = priority is not None and priority <= _VIP_PRIORITY_MAX
+
+    if normalized in _ALWAYS_KAM_ONLY_CATEGORIES:
+        return True, False
+    if normalized == "resignation":
+        kam_owns = priority is not None and priority <= _RESIGNATION_KAM_PRIORITY_MAX
+        return kam_owns, not kam_owns
+
+    kam_notified = is_vip and normalized not in _CS_ONLY_CATEGORIES
+    return kam_notified, True
 
 
 def is_vip_priority(db: Session, astrologer_id: int) -> bool:
-    priority = queue_performance_client.get_queue_performance(db, astrologer_id).priority
+    priority = astrologer_priority(db, astrologer_id)
     # Unranked (None) is deliberately never VIP — see QueuePerformance.priority.
     return priority is not None and priority <= _VIP_PRIORITY_MAX
 
@@ -297,11 +339,11 @@ def create_ticket(
     team = _team_for_category(category)
     kam_name = admin.name if admin else "KAM"
     cs_name = cs_admin.name if cs_admin else None
-    is_vip = is_vip_priority(db, astrologer_id)
     normalized_category = category.strip().lower()
+    priority = astrologer_priority(db, astrologer_id)
+    is_vip = priority is not None and priority <= _VIP_PRIORITY_MAX
 
-    direct_to_kam, kam_notified, cs_notified = routing_for_ticket(category, is_vip)
-    always_direct = normalized_category in _ALWAYS_DIRECT_TO_KAM_CATEGORIES
+    kam_notified, cs_notified = routing_for_ticket(category, priority)
 
     # Persisted so the dashboard's "assigned to me" filter can tell "this
     # admin was actually routed/notified" apart from "this is merely the
@@ -309,7 +351,6 @@ def create_ticket(
     ticket.kam_notified = kam_notified
     ticket.cs_notified = cs_notified
 
-    priority = queue_performance_client.get_queue_performance(db, astrologer_id).priority
     priority_label = f"P{priority}" if priority is not None else "Unranked"
     expert_id_label = astrologer.expert_id if astrologer and astrologer.expert_id else "not linked"
     astrologer_name = astrologer.name if astrologer else "Unknown"
@@ -328,24 +369,24 @@ def create_ticket(
         else ""
     )
 
-    if direct_to_kam:
-        # Routes straight to the KAM's own channel instead of the shared CS
-        # one — "direct to KAM", not just cc'd. Always names the KAM
-        # explicitly (confirmed live 2026-08-19: none of the real KAMs had
-        # ever been given an actual distinct personal slack_channel — all
-        # three were still on the Admin model's shared "#support" default
-        # — so relying on "posted in their own channel" to identify the
-        # recipient left the message with no name and no real Slack
-        # mention/ping at all).
-        channel = admin.slack_channel if admin else settings.SLACK_SUPPORT_CHANNEL
-        reason = "profile photo change" if always_direct else "priority astrologer"
+    # Every ticket now posts to the shared support channel — there's no
+    # separate "the KAM's own personal channel" anymore (none of the real
+    # KAMs had ever actually set one — see the removed direct_to_kam
+    # branch's history).
+    if kam_notified and not cs_notified:
+        # Genuinely KAM-owned, CS excluded entirely — only
+        # _ALWAYS_KAM_ONLY_CATEGORIES ("referral_amount", always) or
+        # "resignation" at P1-P3 ever reach this, per routing_for_ticket.
+        reason = "referral amount request" if normalized_category == "referral_amount" else "resignation"
         text = (
             f"{header}\n{body}\n*Routed directly to {_slack_mention(admin, kam_name)} "
-            f"as their KAM ({reason}).*{cs_line}"
+            f"as their KAM ({reason}).*"
         )
     elif is_vip:
-        # VIP on any other category: shared channel, but KAM explicitly cc'd.
-        channel = settings.SLACK_SUPPORT_CHANNEL
+        # VIP astrologer: KAM explicitly cc'd for visibility — even on a
+        # CS-only category (kam_notified=False), so the KAM still sees it
+        # and can pick it up personally, without it ever landing "in their
+        # name" unless a CS actually escalates it.
         text = (
             f"{header}\n{body}\n*KAM:* {_slack_mention(admin, kam_name)} "
             f"(priority astrologer — please loop in){cs_line}"
@@ -353,10 +394,9 @@ def create_ticket(
     else:
         # Standard CS routing — KAM stays the internal assignee but isn't
         # specially paged for a non-priority astrologer's ticket.
-        channel = settings.SLACK_SUPPORT_CHANNEL
         text = f"{header}\n{body}{cs_line}"
 
-    slack_client.post_message(db, channel=channel, text=text, ticket_id=ticket.id)
+    slack_client.post_message(db, channel=settings.SLACK_SUPPORT_CHANNEL, text=text, ticket_id=ticket.id)
     if attachment_url:
         # Best-effort — pushes the actual photo/video into Slack (see
         # upload_attachment's docstring for why); never blocks ticket

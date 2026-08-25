@@ -121,19 +121,15 @@ def test_vip_priority_ticket_uses_a_real_slack_mention_when_the_kam_has_one_on_f
     assert f"@{seeded_admin.name}" not in entry.message
 
 
-def test_direct_to_kam_ticket_names_the_kam_explicitly_in_slack(
+def test_profile_ticket_at_low_priority_uses_the_standard_cs_routed_channel(
     db_session, seeded_astrologer, seeded_admin, monkeypatch
 ):
-    # Confirmed live 2026-08-19: "profile" (photo_change) tickets go
-    # straight to the KAM's own slack_channel with no explicit name/mention
-    # in the text — fine ONLY if that channel is genuinely personal, but
-    # none of the real KAMs had ever been given one (all still on the
-    # Admin model's shared "#support" default), so the message named no
-    # one and pinged no one. Must always name the KAM regardless of
-    # whether the channel is actually personal.
-    seeded_admin.slack_user_id = "U0123ABC456"
-    db_session.commit()
-    _force_priority(monkeypatch, priority=5)  # low priority — must still go direct for "profile"
+    # 2026-08-25 policy change: "profile" (photo_change) used to always go
+    # straight to the KAM's own channel, CS never looped in at all,
+    # regardless of priority. Now it's CS-only like every other category —
+    # a non-VIP astrologer's profile ticket gets no special KAM channel or
+    # mention at all.
+    _force_priority(monkeypatch, priority=5)
 
     ticket = ticket_service.create_ticket(
         db_session,
@@ -146,8 +142,9 @@ def test_direct_to_kam_ticket_names_the_kam_explicitly_in_slack(
     )
 
     entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
-    assert "<@U0123ABC456>" in entry.message
-    assert "Routed directly to you as their KAM" not in entry.message
+    assert entry.channel != seeded_admin.slack_channel
+    assert "as their KAM" not in entry.message
+    assert "@" not in entry.message
 
 
 def test_non_vip_priority_ticket_does_not_tag_kam(db_session, seeded_astrologer, monkeypatch):
@@ -198,9 +195,109 @@ def test_slack_notification_routes_business_categories_to_business_team(
     assert "business team" in entry.message
 
 
-def test_vip_no_visibility_ticket_routes_directly_to_kam_channel(
+@pytest.mark.parametrize("category,sub_category", [("payout", "payout_delay"), ("kyc", "kyc_rejected")])
+def test_payout_and_kyc_tickets_are_cs_only_even_for_a_vip_astrologer(
+    db_session, seeded_astrologer, monkeypatch, category, sub_category
+):
+    # 2026-08-25 policy change: a VIP astrologer's payout/KYC ticket used to
+    # still tag the KAM as notified (kam_notified=True) purely from being
+    # VIP, even though these were never a direct-to-KAM category. Now CS
+    # owns these regardless of priority, same as technical/no_visibility/
+    # profile/phone_change (see ticket_service._CS_ONLY_CATEGORIES).
+    _force_priority(monkeypatch, priority=1)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category=category,
+        sub_category=sub_category,
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is False
+    assert ticket.cs_notified is True
+
+
+@pytest.mark.parametrize("priority", [1, 5, None])
+def test_referral_amount_ticket_is_always_kam_only(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch, priority
+):
+    # "referral_amount" always goes straight to the KAM, CS excluded
+    # entirely, regardless of priority (or no priority at all).
+    _force_priority(monkeypatch, priority=priority)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="referral_amount",
+        sub_category="referral_bonus_missing",
+        description="Referral bonus not credited",
+        description_en="Referral bonus not credited",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is True
+    assert ticket.cs_notified is False
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert "as their KAM (referral amount request)" in entry.message
+    assert "*CS:*" not in entry.message
+
+
+@pytest.mark.parametrize("priority", [1, 2, 3])
+def test_resignation_ticket_routes_to_kam_at_p1_to_p3(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch, priority
+):
+    _force_priority(monkeypatch, priority=priority)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="resignation",
+        sub_category="wants_to_leave",
+        description="Astrologer wants to resign",
+        description_en="Astrologer wants to resign",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is True
+    assert ticket.cs_notified is False
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert "as their KAM (resignation)" in entry.message
+    assert "*CS:*" not in entry.message
+
+
+@pytest.mark.parametrize("priority", [4, 5, None])
+def test_resignation_ticket_routes_to_cs_at_p4_p5_or_unranked(
+    db_session, seeded_astrologer, seeded_admin, monkeypatch, priority
+):
+    _force_priority(monkeypatch, priority=priority)
+
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="resignation",
+        sub_category="wants_to_leave",
+        description="Astrologer wants to resign",
+        description_en="Astrologer wants to resign",
+        preferred_language="English",
+    )
+
+    assert ticket.kam_notified is False
+    assert ticket.cs_notified is True
+    entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
+    assert "as their KAM" not in entry.message
+
+
+def test_vip_no_visibility_ticket_ccs_the_kam_on_the_shared_channel(
     db_session, seeded_astrologer, seeded_admin, monkeypatch
 ):
+    # 2026-08-25 policy change: "no_visibility" used to route straight to
+    # the KAM's own channel for a VIP astrologer, bypassing CS entirely.
+    # Now it's CS-only like every other category — VIP still gets the KAM
+    # cc'd on the shared channel for visibility, but not kam_notified
+    # ("in their name") unless a CS actually escalates it.
     _force_priority(monkeypatch, priority=2)
 
     ticket = ticket_service.create_ticket(
@@ -214,8 +311,10 @@ def test_vip_no_visibility_ticket_routes_directly_to_kam_channel(
     )
 
     entry = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).one()
-    assert entry.channel == seeded_admin.slack_channel
-    assert f"directly to @{seeded_admin.name} as their KAM" in entry.message
+    assert entry.channel != seeded_admin.slack_channel
+    assert f"*KAM:* @{seeded_admin.name}" in entry.message
+    assert ticket.kam_notified is False
+    assert ticket.cs_notified is True
 
 
 def test_non_vip_no_visibility_ticket_still_uses_shared_channel(
@@ -919,9 +1018,12 @@ def test_photo_change_ticket_requires_a_photo(db_session, seeded_astrologer):
     assert ticket_service.needs_evidence("profile") is True
 
 
-def test_photo_change_routes_directly_to_kam_regardless_of_priority(
+def test_photo_change_is_cs_only_regardless_of_priority(
     db_session, seeded_astrologer, seeded_admin, monkeypatch
 ):
+    # 2026-08-25 policy change: "profile" (photo change) used to be
+    # KAM-only, CS never looped in at all, regardless of priority. Now it's
+    # CS-only instead — the opposite — same as every other category.
     for priority in (1, 5):
         _force_priority(monkeypatch, priority=priority)
         ticket = ticket_service.create_ticket(
@@ -935,18 +1037,15 @@ def test_photo_change_routes_directly_to_kam_regardless_of_priority(
             attachment_url="http://x/beautified.jpg",
         )
 
-        # Two rows now: the text notification, and the attachment-upload
-        # log (create_ticket also pushes the photo into Slack — see
+        # Two rows: the text notification, and the attachment-upload log
+        # (create_ticket also pushes the photo into Slack — see
         # slack_client.upload_attachment).
         entries = db_session.query(SlackLog).filter_by(ticket_id=ticket.id).all()
         assert len(entries) == 2
-        text_entry = next(e for e in entries if "as their KAM" in e.message)
-        assert text_entry.channel == seeded_admin.slack_channel
-        assert ticket.kam_notified is True
-        # Photo Change is KAM-only per policy — CS is never looped in, even
-        # though a CS may still be recorded as assigned_cs_id.
-        assert ticket.cs_notified is False
-        assert "*CS:*" not in text_entry.message
+        text_entry = next(e for e in entries if "*Category:*" in e.message)
+        assert text_entry.channel != seeded_admin.slack_channel
+        assert ticket.kam_notified is False
+        assert ticket.cs_notified is True
 
 
 def test_list_all_tickets_excludes_a_kam_never_actually_notified(
@@ -984,14 +1083,17 @@ def test_list_all_tickets_excludes_a_kam_never_actually_notified(
 def test_list_all_tickets_includes_a_vip_notified_kam(
     db_session, seeded_astrologer, seeded_admin, monkeypatch
 ):
+    # "other" has no CS-only carve-out (see ticket_service._CS_ONLY_CATEGORIES),
+    # so a VIP astrologer's ticket here is the case that still actually
+    # notifies the KAM.
     _force_priority(monkeypatch, priority=1)
     ticket = ticket_service.create_ticket(
         db_session,
         astrologer_id=seeded_astrologer.id,
-        category="no_visibility",
-        sub_category="low_bookings",
-        description="Not getting bookings",
-        description_en="Not getting bookings",
+        category="other",
+        sub_category="general",
+        description="Something else entirely",
+        description_en="Something else entirely",
         preferred_language="English",
     )
     assert ticket.kam_notified is True

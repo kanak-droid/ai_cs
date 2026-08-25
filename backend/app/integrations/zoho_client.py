@@ -254,6 +254,10 @@ def create_ticket(db: Session, ticket: Ticket) -> str | None:
             "status": zoho_status_for(ticket),
             "category": _zoho_category_for(ticket.category),
             "language": _zoho_language_for(ticket),
+            # Every AstroHelp ticket originates from the in-app chatbot, not
+            # an actual phone call — without this, Zoho defaults new
+            # tickets to "Phone", which is simply wrong for all of them.
+            "channel": "Chat",
             "contact": {
                 "lastName": astrologer.name or f"Astrologer #{astrologer.id}",
                 "phone": astrologer.phone,

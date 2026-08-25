@@ -231,6 +231,7 @@ def test_create_ticket_includes_the_required_layout_fields(db_session, seeded_as
     payload = captured["json"]
     assert payload["category"] == "User Queries"  # ticket's category is "other"
     assert payload["language"] == "Hindi"  # no assigned CS in this test -> fallback
+    assert payload["channel"] == "Chat"
     assert payload["cf"] == {
         "cf_user_type": "Astrologer",
         "cf_sub_status": "RNR 1",
