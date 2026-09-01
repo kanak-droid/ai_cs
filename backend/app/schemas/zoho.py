@@ -9,6 +9,11 @@ class ZohoWebhookRequest(BaseModel):
     ticket_id: str
     status: str
     note: str | None = None
+    # Separate from `note` (the "Comment to Astrologer" field) — read from
+    # a distinct "Comment to KAM" Zoho field, only meaningful for
+    # status="Escalated". Kept apart so an astrologer-facing note and a
+    # KAM-only escalation note can never get crossed with each other.
+    kam_note: str | None = None
 
     @field_validator("ticket_id", mode="before")
     @classmethod

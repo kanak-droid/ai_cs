@@ -121,6 +121,33 @@ def test_webhook_escalated_flags_escalated_to_kam(client, db_session, seeded_ast
     assert ticket.escalated_to_kam is True
 
 
+def test_webhook_escalated_uses_the_kam_note_field_not_note(
+    client, db_session, seeded_astrologer, monkeypatch
+):
+    # "note" is the "Comment to Astrologer" field — escalation must read
+    # the separate "Comment to KAM" field (kam_note) instead, since an
+    # escalation note is for the KAM/dashboard only, never the astrologer.
+    ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
+
+    response = client.post(
+        "/api/integrations/zoho/webhook",
+        headers={"X-Zoho-Webhook-Secret": _SECRET},
+        json={
+            "ticket_id": ticket.zoho_ticket_id,
+            "status": "Escalated",
+            "note": "This should not be used",
+            "kam_note": "Needs the KAM's personal relationship here",
+        },
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(ticket)
+    last_entry = ticket.history[-1]
+    assert "Needs the KAM's personal relationship here" in last_entry.note
+    assert "This should not be used" not in last_entry.note
+    assert last_entry.is_status_change is False
+
+
 def test_webhook_replaying_escalated_does_not_duplicate(client, db_session, seeded_astrologer, monkeypatch):
     ticket = _make_pushed_ticket(db_session, seeded_astrologer, monkeypatch)
 

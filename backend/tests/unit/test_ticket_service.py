@@ -610,6 +610,29 @@ def test_transition_status_requires_a_comment_to_resolve(db_session, seeded_astr
     assert ticket.status == TicketStatus.RESOLVED
 
 
+def test_transition_status_marks_the_history_row_as_a_real_status_change(
+    db_session, seeded_astrologer
+):
+    # Contrast with escalate_to_kam/reassign_ticket (_log_note), which set
+    # is_status_change=False — a genuine transition_status call is exactly
+    # what chat-app's ticket-watcher effect should announce.
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.UNDER_REVIEW, changed_by="admin@test.example"
+    )
+
+    assert ticket.history[-1].is_status_change is True
+
+
 def test_get_active_ticket_for_category_finds_an_open_ticket(db_session, seeded_astrologer):
     ticket = ticket_service.create_ticket(
         db_session,
@@ -788,6 +811,9 @@ def test_reassign_ticket_moves_kam_ownership_and_notifies_the_new_kam(
     last_entry = ticket.history[-1]
     assert "Other KAM" in last_entry.note
     assert "Covering for original KAM" in last_entry.note
+    # Never a real status transition — must not be announced to the
+    # astrologer as a status update (see chat-app's ticket-watcher effect).
+    assert last_entry.is_status_change is False
 
 
 def test_reassign_ticket_rejects_an_admin_of_the_wrong_role(
@@ -919,6 +945,9 @@ def test_escalate_to_kam_flags_the_ticket_and_notifies_the_kam(
     assert ticket.escalated_at is not None
     assert ticket.kam_notified is True
     assert "Needs the KAM's relationship here" in ticket.history[-1].note
+    # Never a real status transition — must not be announced to the
+    # astrologer as a status update (see chat-app's ticket-watcher effect).
+    assert ticket.history[-1].is_status_change is False
 
 
 def test_escalating_a_resolved_ticket_does_not_reset_its_resolution(

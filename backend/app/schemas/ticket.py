@@ -12,6 +12,7 @@ class TicketStatusHistoryRead(BaseModel):
     changed_at: datetime
     changed_by: str
     note: str | None = None
+    is_status_change: bool = True
 
 
 class TicketRead(BaseModel):

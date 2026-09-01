@@ -171,6 +171,87 @@ def test_a_zoho_failure_never_blocks_a_status_transition(db_session, seeded_astr
     assert ticket.status == TicketStatus.IN_PROGRESS
 
 
+def test_resolving_from_our_dashboard_posts_the_note_as_a_zoho_comment(
+    db_session, seeded_astrologer, monkeypatch
+):
+    # The status flip alone doesn't say WHY — a KAM/admin's resolution note
+    # must also reach Zoho as a comment, not just get silently dropped.
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+    assert ticket.zoho_ticket_id is not None
+
+    status_calls = []
+    comment_calls = []
+    monkeypatch.setattr(
+        zoho_client, "update_status", lambda zoho_id, status: status_calls.append((zoho_id, status))
+    )
+    monkeypatch.setattr(
+        zoho_client, "post_comment", lambda zoho_id, comment: comment_calls.append((zoho_id, comment))
+    )
+
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed the payout delay"
+    )
+
+    assert status_calls == [(ticket.zoho_ticket_id, "Closed")]
+    assert comment_calls == [(ticket.zoho_ticket_id, "Fixed the payout delay")]
+
+
+def test_a_status_change_with_no_note_does_not_post_a_blank_zoho_comment(
+    db_session, seeded_astrologer, monkeypatch
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("post_comment should never be called with no note")
+
+    monkeypatch.setattr(zoho_client, "post_comment", _boom)
+
+    ticket_service.transition_status(
+        db_session, ticket, TicketStatus.IN_PROGRESS, changed_by="admin@test.example"
+    )
+
+
+def test_a_zoho_comment_sync_failure_never_blocks_a_status_transition(
+    db_session, seeded_astrologer, monkeypatch
+):
+    ticket = ticket_service.create_ticket(
+        db_session,
+        astrologer_id=seeded_astrologer.id,
+        category="other",
+        sub_category="general",
+        description="issue",
+        description_en="issue",
+        preferred_language="English",
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Zoho is down")
+
+    monkeypatch.setattr(zoho_client, "post_comment", _boom)
+
+    ticket = ticket_service.transition_status(
+        db_session, ticket, TicketStatus.RESOLVED, changed_by="admin@test.example", note="Fixed it"
+    )
+
+    assert ticket.status == TicketStatus.RESOLVED
+
+
 def test_a_status_change_that_came_from_zoho_is_not_synced_back_to_zoho(
     db_session, seeded_astrologer, monkeypatch
 ):

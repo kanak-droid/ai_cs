@@ -49,6 +49,14 @@ function categoryLabel(category: string): string {
   return category.replace(/_/g, " ");
 }
 
+// A CS/KAM's note set on its own line, clearly attributed as their own
+// words rather than squished onto the same sentence as the status update —
+// confirmed live this read as an obviously templated single paragraph
+// otherwise, not like a real person had actually replied.
+function noteBlock(note: string | null | undefined): string {
+  return note ? `\n\nPlease refer to the below response from our team:\n\n**${note}**` : "";
+}
+
 function welcomeMessage(astrologer: { name: string } | null): DisplayMessage {
   const greeting = astrologer
     ? `Hi ${casualFirstName(astrologer.name)}, how can I help you today?`
@@ -172,7 +180,7 @@ export function ChatPage() {
           {
             id: makeId(),
             role: "assistant",
-            text: `Good news — regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id} is marked **Resolved** by our team.${latestNote ? ` **${latestNote}**` : ""} Please rate how we handled it:`,
+            text: `Good news — regarding your ${categoryLabel(ticket.category)} issue, your ticket #${ticket.id} is marked **Resolved** by our team.${noteBlock(latestNote)}\n\nPlease rate how we handled it:`,
             status: "sent",
             ticketRatingPrompt: ticket.id,
           },
@@ -199,6 +207,11 @@ export function ChatPage() {
       // Announce every row added since the last poll (not just the latest)
       // so a burst of updates between 15s polls doesn't collapse into one.
       for (const entry of history.slice(previouslyAnnounced)) {
+        // An ownership/escalation log entry (reassignment, escalation) —
+        // its note is written for the KAM/internal record, not the
+        // astrologer, and it reuses the ticket's current status verbatim
+        // rather than actually changing it, so it must never surface here.
+        if (!entry.is_status_change) continue;
         // Closed via the astrologer's own "Satisfied" click seconds ago —
         // they already told us themselves; a generic FYI right after that
         // is pure noise, not new information (confirmed live: this read as
@@ -209,7 +222,7 @@ export function ChatPage() {
         const text =
           entry.status === "closed" && ticket.satisfaction === null
             ? `${intro} was automatically marked **Closed** after 48 hours with no response. Still an issue? Just tell me and I'll reopen it.`
-            : `${intro} is marked **${STATUS_LABELS[entry.status]}** by our team.${entry.note ? ` **${entry.note}**` : ""}`;
+            : `${intro} is marked **${STATUS_LABELS[entry.status]}** by our team.${noteBlock(entry.note)}`;
         setMessages((prev) => [
           ...prev,
           { id: makeId(), role: "assistant", text, status: "sent", isTicketStatusUpdate: true },

@@ -23,5 +23,12 @@ class TicketStatusHistory(Base):
     changed_at: Mapped[datetime] = mapped_column(default=utcnow)
     changed_by: Mapped[str] = mapped_column(String(120), default="system")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # True for a real status transition (_record_status); False for an
+    # ownership/escalation log entry (_log_note) that reuses the ticket's
+    # CURRENT status verbatim rather than actually changing it. Lets
+    # chat-app's ticket-watcher tell the two apart — an escalation note is
+    # written for the KAM, not the astrologer, and must never be announced
+    # as if it were a status update.
+    is_status_change: Mapped[bool] = mapped_column(default=True)
 
     ticket: Mapped["Ticket"] = relationship(back_populates="history")

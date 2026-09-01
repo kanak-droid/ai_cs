@@ -37,7 +37,12 @@ logger = logging.getLogger(__name__)
 
 # Zoho Desk's own status set is coarser than ours — see the mapping this
 # feeds (ticket_service.py). escalated_to_kam overrides to "Escalated"
-# regardless of the underlying TicketStatus.
+# regardless of the underlying TicketStatus, EXCEPT once the ticket reaches
+# a terminal status (resolved/closed) — see zoho_status_for. A resolved
+# ticket doesn't need KAM attention anymore just because it was escalated
+# at some earlier point in its life; without this carve-out, an escalated
+# ticket that later gets resolved would stay stuck showing "Escalated" in
+# Zoho forever instead of flipping to "Closed".
 _STATUS_MAP = {
     "submitted": "Open",
     "assigned_to_kam": "Open",
@@ -46,6 +51,7 @@ _STATUS_MAP = {
     "resolved": "Closed",
     "closed": "Closed",
 }
+_TERMINAL_STATUSES = {"resolved", "closed"}
 
 # Your ticket layout requires Category, Language, and Sub Issue Category
 # (plus User Type/Sub Status/Comments, handled directly in create_ticket)
@@ -147,6 +153,8 @@ _agents_cache_expires_at: float = 0.0
 
 
 def zoho_status_for(ticket: Ticket) -> str:
+    if ticket.status.value in _TERMINAL_STATUSES:
+        return _STATUS_MAP[ticket.status.value]
     if ticket.escalated_to_kam:
         return "Escalated"
     return _STATUS_MAP[ticket.status.value]

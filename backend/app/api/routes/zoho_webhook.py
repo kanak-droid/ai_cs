@@ -32,6 +32,12 @@ def handle_zoho_webhook(
     write — so the existing invariants (a resolved ticket needs a note, it
     triggers the astrologer's rating flow, escalating notifies the KAM)
     still apply exactly the same as a change made from our own dashboard.
+    Escalation reads a SEPARATE Zoho field (kam_note, "Comment to KAM") —
+    never body.note ("Comment to Astrologer") — since escalate_to_kam logs
+    it via _log_note with is_status_change=False, meaning it's for the
+    KAM/dashboard only and must never reach the astrologer in chat (see
+    ChatPage.tsx's ticket-watcher effect, which skips anything with
+    is_status_change=False).
     Zoho's "Closed" maps to our `resolved`, never `closed` directly —
     `closed` is reserved for the astrologer's own confirmation or the 48h
     auto-close, both of which the rating flow depends on; skipping straight
@@ -70,7 +76,7 @@ def handle_zoho_webhook(
     elif body.status == "Escalated":
         if not ticket.escalated_to_kam:
             ticket_service.escalate_to_kam(
-                db, ticket, changed_by="zoho", note=body.note or "Escalated via Zoho Desk"
+                db, ticket, changed_by="zoho", note=body.kam_note or "Escalated via Zoho Desk"
             )
     elif body.status == "On Hold":
         if ticket.status not in _TERMINAL_STATUSES:

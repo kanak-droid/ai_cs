@@ -78,6 +78,19 @@ def test_zoho_status_for_escalated_overrides_underlying_status():
     assert zoho_client.zoho_status_for(_FakeTicket()) == "Escalated"
 
 
+def test_zoho_status_for_terminal_status_wins_over_escalated():
+    # Regression: an escalated ticket that later gets resolved must show
+    # "Closed" in Zoho, not stay stuck showing "Escalated" forever just
+    # because it was escalated at some earlier point in its life.
+    class _FakeTicket:
+        escalated_to_kam = True
+
+    for status in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+        ticket = _FakeTicket()
+        ticket.status = status
+        assert zoho_client.zoho_status_for(ticket) == "Closed"
+
+
 def test_zoho_category_for_maps_known_categories():
     assert zoho_client._zoho_category_for("payout") == "Payment Queries"
     assert zoho_client._zoho_category_for("kyc") == "Withdrawal / KYC"

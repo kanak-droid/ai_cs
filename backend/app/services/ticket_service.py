@@ -205,7 +205,15 @@ def _slack_mention(admin: Admin | None, fallback_name: str) -> str:
 def _record_status(
     db: Session, ticket: Ticket, status: TicketStatus, *, changed_by: str, note: str | None = None
 ) -> None:
-    db.add(TicketStatusHistory(ticket_id=ticket.id, status=status, changed_by=changed_by, note=note))
+    db.add(
+        TicketStatusHistory(
+            ticket_id=ticket.id,
+            status=status,
+            changed_by=changed_by,
+            note=note,
+            is_status_change=True,
+        )
+    )
     ticket.status = status
     if status == TicketStatus.RESOLVED:
         # Fresh resolution — start (or restart, after a reopen) the
@@ -247,6 +255,16 @@ def _record_status(
             zoho_client.update_status(ticket.zoho_ticket_id, zoho_client.zoho_status_for(ticket))
         except Exception:
             logger.exception("Zoho Desk status sync raised unexpectedly for ticket #%s", ticket.id)
+        # The status flip alone doesn't say WHY (e.g. what a KAM actually
+        # did to resolve it) — post the note as a comment too, so whoever
+        # looks at the ticket in Zoho sees the explanation, not just a bare
+        # status change. Same no-op-when-never-pushed/mock-mode safety as
+        # post_comment already has internally.
+        if note:
+            try:
+                zoho_client.post_comment(ticket.zoho_ticket_id, note)
+            except Exception:
+                logger.exception("Zoho Desk comment sync raised unexpectedly for ticket #%s", ticket.id)
 
 
 def _maybe_push_to_zoho(db: Session, ticket: Ticket) -> None:
@@ -315,7 +333,15 @@ def _log_note(db: Session, ticket: Ticket, *, changed_by: str, note: str) -> Non
     RESOLVED ticket it would reset resolved_at to now and wipe satisfaction,
     which a mere ownership/escalation change must never trigger.
     """
-    db.add(TicketStatusHistory(ticket_id=ticket.id, status=ticket.status, changed_by=changed_by, note=note))
+    db.add(
+        TicketStatusHistory(
+            ticket_id=ticket.id,
+            status=ticket.status,
+            changed_by=changed_by,
+            note=note,
+            is_status_change=False,
+        )
+    )
 
 
 def create_ticket(

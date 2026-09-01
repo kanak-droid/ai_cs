@@ -11,6 +11,11 @@ export interface TicketStatusHistoryEntry {
   changed_at: string;
   changed_by: string;
   note: string | null;
+  // False for an ownership/escalation log entry (reassignment, escalation)
+  // that reuses the ticket's current status verbatim rather than actually
+  // changing it — chat-app must never announce these to the astrologer as
+  // if they were a real status update (an escalation note is for the KAM).
+  is_status_change: boolean;
 }
 
 export interface Ticket {
