@@ -160,6 +160,24 @@ class Settings(BaseSettings):
     # tunnel (ngrok/etc.) during local dev.
     VOICE_PUBLIC_BASE_URL: str = "http://localhost:8000"
 
+    # The phone agent's LLM — OpenRouter (https://openrouter.ai), not
+    # Vertex/Gemini — see app/agent/openrouter_client.py. Deliberately
+    # independent of the GEMINI_* settings above: text chat and the phone
+    # agent are free to run on different model providers, since only the
+    # tool-calling loop (orchestrator.py) and every tool in
+    # tool_registry.py are actually shared between them.
+    OPENROUTER_API_KEY: str = ""
+    # Verified live against a real OpenRouter key on 2026-09-03 — several
+    # Anthropic/Google model slugs 404'd ("No endpoints found") on that
+    # account despite being valid OpenRouter model ids, most likely a
+    # provider disabled in that account's OpenRouter settings rather than a
+    # bad slug. openai/gpt-4o-mini is confirmed working and supports tool
+    # calling; swap it for whichever model you actually want the phone
+    # agent running on (see https://openrouter.ai/models), but if a swap
+    # 404s, check the account's enabled providers before assuming the slug
+    # is wrong.
+    OPENROUTER_MODEL: str = "openai/gpt-4o-mini"
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
 

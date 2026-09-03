@@ -4,18 +4,25 @@ real new logic here is telephony bookkeeping (request_call,
 handle_lifecycle_event); handle_custom_llm_turn is a thin adapter from
 Vapi's OpenAI-shaped turn format onto run_chat_turn, the same function
 chat_service.handle_chat_turn calls.
+
+Runs on OpenRouter (app/agent/openrouter_client.py), not Gemini — a
+deliberate split from chat, not an oversight: the phone agent and the
+text-chat agent are free to run on different model providers since only
+the tool-calling loop (orchestrator.py) and tool_registry.py are actually
+shared between them.
 """
 
 import logging
 
 from sqlalchemy.orm import Session
 
-from app.agent.client import AgentClient, get_agent_client
+from app.agent.client import AgentClient
 from app.agent.context import SessionContext
 from app.agent.orchestrator import ChatTurnResult, HistoryTurn, run_chat_turn
 from app.core.errors import NotFoundError
 from app.core.security import AstrologerContext
 from app.core.time import utcnow
+from app.agent.openrouter_client import get_voice_agent_client
 from app.integrations import voice_client
 from app.models.astrologer import Astrologer
 from app.models.call import Call
@@ -97,7 +104,7 @@ def handle_custom_llm_turn(
         session_id=call.session_id,
         has_prior_reply=any(t.role == "assistant" for t in agent_history),
     )
-    result = run_chat_turn(client or get_agent_client(), ctx, latest.content, history=agent_history)
+    result = run_chat_turn(client or get_voice_agent_client(), ctx, latest.content, history=agent_history)
 
     call.transcript = (call.transcript or "") + f"\nAstrologer: {latest.content}\nAgent: {result.reply}"
     if result.metadata.get("created_ticket_id"):

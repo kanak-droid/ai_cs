@@ -58,7 +58,7 @@ def test_custom_llm_runs_the_same_orchestrator_as_chat(
     call = _seed_call(db_session, seeded_astrologer)
 
     fake_client = FakeAgentClient([text_response("Your payout is scheduled for the 5th.")])
-    monkeypatch.setattr("app.services.call_service.get_agent_client", lambda: fake_client)
+    monkeypatch.setattr("app.services.call_service.get_voice_agent_client", lambda: fake_client)
 
     response = client.post(
         "/api/voice/custom-llm",
