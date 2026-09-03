@@ -18,6 +18,16 @@ utterance (not the full history) each time, so app/api/routes/voice.py's
 WebSocket handler owns the conversation's SessionContext/history for the
 connection's lifetime and calls run_conversation_turn once per caller
 utterance.
+
+Latency, reported live 2026-09-04: run_conversation_turn is NOT
+streamed — it waits for the whole reply (including any tool-call round
+trip) before returning, and the WebSocket handler sends it to
+ConversationRelay as one text message, so TTS can't start speaking the
+first sentence while the rest is still being generated. speechTimeout
+below is tuned down from Twilio's cautious "auto" default as a partial,
+low-risk mitigation; true token-level streaming through the tool-calling
+loop would help more but is a real orchestrator-level redesign, not
+attempted here yet.
 """
 
 import logging
@@ -156,6 +166,14 @@ def generate_connect_twiml(call: Call) -> str:
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response><Connect>"
         f'<ConversationRelay url="{escape(ws_url)}" '
+        # 700ms rather than the "auto" default — auto is deliberately
+        # cautious about not cutting someone off mid-sentence, at the cost
+        # of a longer pause before the agent starts responding after the
+        # caller stops talking. 700 is close to Twilio's documented
+        # minimum (600) without being right at the edge; worth raising
+        # back up if callers start getting cut off mid-thought in
+        # practice — see call_service.py's module docstring on latency.
+        'speechTimeout="700" '
         # Explicit rather than relying on the (same-valued) documented
         # defaults — this exact behavior was reported broken once already
         # (see app/api/routes/voice.py's conversation_relay docstring for

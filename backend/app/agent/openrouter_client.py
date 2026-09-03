@@ -146,18 +146,29 @@ class OpenRouterAgentClient:
     def generate(
         self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
     ) -> types.GenerateContentResponse:
+        body = {
+            "model": settings.OPENROUTER_MODEL,
+            "messages": _contents_to_messages(system, contents),
+            "tools": _tools_to_openai(tools),
+            "max_tokens": _MAX_OUTPUT_TOKENS,
+        }
+        if settings.OPENROUTER_PROVIDER_ORDER:
+            # Without this, OpenRouter picks among whichever providers host
+            # this model slug by its own policy — for a latency-sensitive
+            # phone call that's a real problem, since the same model can be
+            # served by providers with very different inference speed
+            # (e.g. Groq's LPU inference vs. a standard hosted endpoint,
+            # measured live 2026-09-04 at roughly 3x faster for this
+            # account's default model). Forcing the order pins it down.
+            body["provider"] = {"order": settings.OPENROUTER_PROVIDER_ORDER.split(",")}
+
         response = httpx.post(
             _OPENROUTER_URL,
             headers={
                 "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": settings.OPENROUTER_MODEL,
-                "messages": _contents_to_messages(system, contents),
-                "tools": _tools_to_openai(tools),
-                "max_tokens": _MAX_OUTPUT_TOKENS,
-            },
+            json=body,
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()

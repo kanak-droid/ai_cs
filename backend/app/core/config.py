@@ -179,12 +179,25 @@ class Settings(BaseSettings):
     # Anthropic/Google model slugs 404'd ("No endpoints found") on that
     # account despite being valid OpenRouter model ids, most likely a
     # provider disabled in that account's OpenRouter settings rather than a
-    # bad slug. openai/gpt-4o-mini is confirmed working and supports tool
-    # calling; swap it for whichever model you actually want the phone
+    # bad slug. Swap this for whichever model you actually want the phone
     # agent running on (see https://openrouter.ai/models), but if a swap
     # 404s, check the account's enabled providers before assuming the slug
     # is wrong.
-    OPENROUTER_MODEL: str = "openai/gpt-4o-mini"
+    #
+    # Switched from openai/gpt-4o-mini to this (2026-09-04) after live
+    # latency complaints on a real call — measured on this account,
+    # this model via Groq averaged ~0.44s per completion (incl. a tool
+    # call) vs. ~1.32s for gpt-4o-mini, ~3x faster, and a phone turn
+    # needing a tool is two completions back to back, so it compounds.
+    # Confirmed tool-calling still works correctly via Groq before
+    # switching, not just plain chat.
+    OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct"
+    # Comma-separated provider names, forces OpenRouter's routing rather
+    # than letting it pick among whichever providers host this model slug
+    # by its own policy — see app/agent/openrouter_client.py. Empty means
+    # "let OpenRouter choose". Leave this in sync with whichever provider
+    # OPENROUTER_MODEL above was actually benchmarked/verified against.
+    OPENROUTER_PROVIDER_ORDER: str = "groq"
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
