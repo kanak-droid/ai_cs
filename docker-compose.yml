@@ -17,5 +17,36 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build:
+      # Context MUST be the repo root — backend/Dockerfile also builds the
+      # chat-app SPA into the image (npm workspaces from the root package.json).
+      context: .
+      dockerfile: backend/Dockerfile
+    image: astrohelp-backend:latest
+    container_name: astrohelp-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # Talk to Postgres over the compose network (service name + internal
+      # port), not the host-published 5434. Set here (not in .env) because it
+      # is container-network-specific and must override any host-oriented
+      # DATABASE_URL a developer's .env might carry.
+      DATABASE_URL: "postgresql+psycopg2://astrohelp:astrohelp@postgres:5432/astrohelp"
+    # Real secrets / feature flags live in backend/.env (gitignored). This is
+    # where VOICE_MOCK_MODE, the TWILIO_* creds, VOICE_PUBLIC_BASE_URL and
+    # OPENROUTER_API_KEY come from. Values here are NOT overridden by the
+    # environment: block above (except DATABASE_URL, which isn't set in .env
+    # for the container network). Marked not-required so the stack still comes
+    # up with no .env present — in which case the call stays in mock mode
+    # (VOICE_MOCK_MODE defaults to true in app/core/config.py).
+    env_file:
+      - path: ./backend/.env
+        required: false
+
 volumes:
   postgres-data:

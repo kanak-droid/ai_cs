@@ -12,7 +12,11 @@ dict happened to keep. The sync service maps columns by their fixed position
 in the header row instead, having already been checked against the sheet.
 """
 
+import csv
+import io
+import re
 import time
+import urllib.request
 from http.client import IncompleteRead
 from pathlib import Path
 
@@ -25,6 +29,70 @@ from app.core.google_credentials import parse_service_account_json
 _MAX_ATTEMPTS = 3
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+# Public-sheet fallback: when no service-account credential is configured but
+# the sheet is shared "anyone with the link can view", it can still be read
+# over the same unauthenticated CSV export / htmlview endpoints a browser uses.
+# This keeps the sync runnable in local/dev without provisioning a service
+# account, and is a no-op whenever a real credential IS set (see _get_service).
+_PUBLIC_TIMEOUT = 30
+_PUBLIC_UA = "Mozilla/5.0 (compatible; AstroHelpSheetsSync/1.0)"
+_public_tab_gids: dict[str, dict[str, str]] = {}
+
+
+def _has_service_account() -> bool:
+    """True when a real Google credential is available (env JSON or file)."""
+    if _credentials_info_from_env() is not None:
+        return True
+    return _credentials_path().exists()
+
+
+def _http_get(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": _PUBLIC_UA})
+    with urllib.request.urlopen(req, timeout=_PUBLIC_TIMEOUT) as resp:  # noqa: S310 (fixed https host)
+        return resp.read().decode("utf-8", "replace")
+
+
+def _public_tab_gid_map(spreadsheet_id: str) -> dict[str, str]:
+    """{tab_title: gid} for a public spreadsheet, parsed from its htmlview page
+    (the same JSON blob the Sheets htmlview UI builds its tab bar from). Cached
+    per spreadsheet id for the process's lifetime.
+    """
+    cached = _public_tab_gids.get(spreadsheet_id)
+    if cached is not None:
+        return cached
+    html = _http_get(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/htmlview")
+    gids = re.findall(r'gid: "(\d+)",initialSheet', html)
+    names = re.findall(r'items\.push\(\{name: "((?:[^"\\]|\\.)*)"', html)
+    unescape = lambda s: re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), s)
+    mapping = {unescape(n): g for g, n in zip(gids, names)}
+    _public_tab_gids[spreadsheet_id] = mapping
+    return mapping
+
+
+def _public_read_tab(
+    spreadsheet_id: str, tab_title: str, header_row: int, max_rows: int
+) -> tuple[list[str], list[list[str]]]:
+    gid = _public_tab_gid_map(spreadsheet_id).get(tab_title)
+    if gid is None:
+        raise RuntimeError(
+            f"Public spreadsheet {spreadsheet_id} has no tab titled {tab_title!r} "
+            f"(available: {sorted(_public_tab_gid_map(spreadsheet_id))[:15]})"
+        )
+    text = _http_get(
+        f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
+    )
+    all_rows = list(csv.reader(io.StringIO(text)))
+    # header_row is 1-indexed (as shown in the Sheets UI); mirror the
+    # authenticated path's "header line + data lines" return shape.
+    window = all_rows[header_row - 1 : header_row - 1 + max_rows + 1]
+    if not window:
+        return [], []
+    return window[0], window[1:]
+
+
+def _public_list_tab_titles(spreadsheet_id: str) -> list[str]:
+    return list(_public_tab_gid_map(spreadsheet_id))
 
 
 def _credentials_path() -> Path:
@@ -66,6 +134,9 @@ def read_tab(
     to line up positionally with header_row_values isn't guaranteed (Sheets
     omits trailing empty cells), so callers must index defensively.
     """
+    if not _has_service_account():
+        return _public_read_tab(spreadsheet_id, tab_title, header_row, max_rows)
+
     service = _get_service()
     range_ = f"'{tab_title}'!{header_row}:{header_row + max_rows}"
     request = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_)
@@ -100,6 +171,9 @@ def list_tab_titles(spreadsheet_id: str) -> list[str]:
     rather than requiring a manually-updated tab name in settings every
     time a new one is added (see sheets_sync_service._latest_payout_cycle).
     """
+    if not _has_service_account():
+        return _public_list_tab_titles(spreadsheet_id)
+
     service = _get_service()
     result = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id, fields="sheets.properties.title"

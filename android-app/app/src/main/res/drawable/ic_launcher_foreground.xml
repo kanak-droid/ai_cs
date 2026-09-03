@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A simple four-point sparkle, centered within the adaptive icon safe zone. -->
+    <path
+        android:fillColor="#FBF3EA"
+        android:pathData="M54,30 C56,44 64,52 78,54 C64,56 56,64 54,78 C52,64 44,56 30,54 C44,52 52,44 54,30 Z" />
+</vector>

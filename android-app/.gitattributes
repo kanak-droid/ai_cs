@@ -1,0 +1,13 @@
+# Normalize line endings so they don't depend on the contributor's OS.
+# Text files are stored with LF in the repo; the Windows batch launcher keeps
+# CRLF because cmd.exe requires it.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+
+# Treat wrapper/binary artifacts as binary so Git never touches their bytes.
+*.jar binary
+*.webp binary
+*.png binary
+*.keystore binary
+gradle/wrapper/gradle-wrapper.jar binary

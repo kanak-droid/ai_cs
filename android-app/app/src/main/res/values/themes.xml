@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. Compose drives the real colors via AstroHelpTheme;
+         this XML theme just gives the Activity a no-action-bar window with a warm
+         cream background so there's no flash of white before Compose paints. -->
+    <style name="Theme.AstroHelp" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/cream</item>
+        <item name="android:statusBarColor">@color/cream</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
