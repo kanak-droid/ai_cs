@@ -11,8 +11,9 @@ export function CallLogsPage() {
   const resolutionStatus = searchParams.get("resolution_status") ?? undefined;
   const dateFrom = searchParams.get("from") ?? undefined;
   const dateTo = searchParams.get("to") ?? undefined;
+  const astrologer = searchParams.get("astrologer") ?? undefined;
 
-  const { data: calls, status } = useCallLogs({ resolutionStatus, dateFrom, dateTo });
+  const { data: calls, status } = useCallLogs({ resolutionStatus, dateFrom, dateTo, astrologer });
 
   const activeCalls = calls?.filter((c) => c.status !== "ended" && c.status !== "failed") ?? [];
   const completedCalls = calls?.filter((c) => c.status === "ended" || c.status === "failed") ?? [];

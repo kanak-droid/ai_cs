@@ -16,6 +16,7 @@ def list_call_logs(
     resolution_status: str | None = Query(default=None),
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
+    astrologer: str | None = Query(default=None),
     admin: AdminContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> list[CallLogSummaryRead]:
@@ -24,6 +25,7 @@ def list_call_logs(
         resolution_status=resolution_status,
         date_from=date_from,
         date_to=date_to,
+        astrologer_search=astrologer,
     )
     return [CallLogSummaryRead.model_validate(c) for c in calls]
 

@@ -94,6 +94,10 @@ export interface AnalyticsOverview {
   // rating, not tied to any ticket).
   avg_ticket_rating: number | null;
   ticket_rating_distribution: Record<string, number>;
+  total_calls: number;
+  avg_call_duration_seconds: number | null;
+  call_resolution_counts: Record<string, number>;
+  calls_with_ticket: number;
   kam_performance: KamPerformance[];
   weekly_ticket_trend: TicketPeriodCount[];
   monthly_ticket_trend: TicketPeriodCount[];

@@ -14,9 +14,25 @@ const RESOLUTION_OPTIONS = [
 export function CallLogFilters() {
   const [searchParams, setSearchParams] = useSearchParams();
   const resolution = searchParams.get("resolution_status") ?? "";
+  const astrologer = searchParams.get("astrologer") ?? "";
 
   return (
     <div className="flex flex-wrap items-center gap-3">
+      <input
+        type="text"
+        placeholder="Astrologer name or ID"
+        value={astrologer}
+        onChange={(e) => {
+          const next = new URLSearchParams(searchParams);
+          if (e.target.value) {
+            next.set("astrologer", e.target.value);
+          } else {
+            next.delete("astrologer");
+          }
+          setSearchParams(next);
+        }}
+        className="w-44 rounded-lg border border-night/15 px-3 py-2 text-sm text-ink placeholder:text-night/30 focus-visible:border-terracotta focus-visible:outline-none"
+      />
       <select
         value={resolution}
         onChange={(e) => {
