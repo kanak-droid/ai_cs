@@ -101,31 +101,6 @@ fun CallScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Priority selector — tells the backend which queue to place the call in.
-       /* Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PriorityOption(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Filled.PriorityHigh,
-                title = "High priority",
-                subtitle = "Urgent · call first",
-                accent = Clay,
-                selected = priority == CallPriority.HIGH,
-                onClick = { priority = CallPriority.HIGH },
-            )
-            PriorityOption(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Filled.LowPriority,
-                title = "Low priority",
-                subtitle = "Can wait a bit",
-                accent = Ochre,
-                selected = priority == CallPriority.LOW,
-                onClick = { priority = CallPriority.LOW },
-            )
-        }*/
-
         Spacer(Modifier.weight(1f))
 
         ReceiveCallCard(
@@ -157,19 +132,6 @@ fun CallScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-
-        /*Text(
-            "What we can help with",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = scheme.onBackground,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )*/
-
-       /* HelpTopicRow(Icons.Filled.Payments, "Payouts & earnings", "Track, delays and corrections")
-        HelpTopicRow(Icons.Filled.VerifiedUser, "KYC & verification", "Documents and account status")
-        HelpTopicRow(Icons.Filled.ReceiptLong, "Salary & invoices", "Statements and breakdowns")
-        HelpTopicRow(Icons.Filled.Person, "Account & profile", "Details, access and settings")*/
     }
 }
 

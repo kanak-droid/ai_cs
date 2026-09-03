@@ -8,7 +8,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.astrolokal.astrohelp.ui.AppViewModel
+import com.astrolokal.astrohelp.ui.CallScreen
 import com.astrolokal.astrohelp.ui.theme.AstroHelpTheme
 
 /**
@@ -28,20 +34,31 @@ class MainActivity : ComponentActivity() {
 
         // Accept the handoff as a String or a numeric extra, and also as a
         // deep-link query param (astrohelp://open?user_id=123) for flexibility.
+        val handoffUserId =
+            intent?.getStringExtra(EXTRA_USER_ID)
+                ?: intent?.extras?.get(EXTRA_USER_ID)?.toString()
+                ?: intent?.data?.getQueryParameter("user_id")
         val baseUrlOverride = intent?.getStringExtra(EXTRA_BASE_URL)
 
         setContent {
             AstroHelpTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    // TEMP preview harness — renders the Help & Support screen directly
-                    // so the UI can be viewed without a running backend. Revert to
-                    // AstroHelpApp(...) after review.
-                    com.astrolokal.astrohelp.ui.CallScreen(
-                        astrologerName = "Priya",
-                        requesting = false,
-                        callStatus = null,
-                        callError = null,
-                        onRequestCall = {},
+                    // Open straight to the Help & Support screen, but back it with the
+                    // real AppViewModel so tapping "Receive a Call" hits the backend
+                    // (POST /api/voice/request-call), which places the Twilio call.
+                    val appViewModel: AppViewModel = viewModel()
+                    val state by appViewModel.state.collectAsState()
+
+                    // Authenticate once with the handed-off user_id (or saved
+                    // session) so requestCall() has an authenticated ApiClient.
+                    LaunchedEffect(Unit) { appViewModel.begin(handoffUserId, baseUrlOverride) }
+
+                    CallScreen(
+                        astrologerName = state.astrologer?.name.orEmpty(),
+                        requesting = state.requestingCall,
+                        callStatus = state.callStatus,
+                        callError = state.callError,
+                        onRequestCall = appViewModel::requestCall,
                     )
                 }
             }
