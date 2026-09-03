@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _REQUEST_TIMEOUT_SECONDS = 30.0
+_STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 _MAX_OUTPUT_TOKENS = 2048
 
 
@@ -198,7 +199,7 @@ class OpenRouterAgentClient:
             _OPENROUTER_URL,
             headers=_headers(),
             json=body,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
+            timeout=_STREAM_TIMEOUT,
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -248,11 +249,9 @@ class OpenRouterAgentClient:
         )
         try:
             response.raise_for_status()
-        except httpx.HTTPStatusError:
-            # A few OpenRouter providers do not implement JSON mode. The
-            # prompt still requests JSON, so retrying without response_format
-            # keeps end-of-call summaries available instead of dropping to
-            # the deterministic fallback unnecessarily.
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 422):
+                raise
             body.pop("response_format")
             response = httpx.post(
                 _OPENROUTER_URL,

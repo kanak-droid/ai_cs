@@ -209,9 +209,9 @@ async def conversation_relay(
                             "last": False,
                         }
                     )
-        if my_turn_id != turn_id:
-            return  # caller interrupted or spoke again while this was generating — never speak a stale reply
-        await websocket.send_json({"type": "text", "token": "", "last": True})
+            if my_turn_id != turn_id:
+                return
+            await websocket.send_json({"type": "text", "token": "", "last": True})
 
     try:
         while True:
