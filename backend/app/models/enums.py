@@ -53,3 +53,16 @@ class AdminAccessLevel(str, enum.Enum):
 
     NORMAL = "normal"
     ADMIN = "admin"
+
+
+class CallStatus(str, enum.Enum):
+    """Lifecycle of an AI support call — see app/models/call.py and
+    call_service.py. QUEUED is set the moment we ask Vapi to dial; everything
+    after that is driven by Vapi's status-update/end-of-call-report webhooks,
+    never by the request-call route itself."""
+
+    QUEUED = "queued"
+    RINGING = "ringing"
+    IN_PROGRESS = "in_progress"
+    ENDED = "ended"
+    FAILED = "failed"
