@@ -195,6 +195,16 @@ class Settings(BaseSettings):
     # "let OpenRouter choose". Leave this in sync with whichever provider
     # OPENROUTER_MODEL above was actually benchmarked/verified against.
     OPENROUTER_PROVIDER_ORDER: str = "groq"
+    # Conversation temperature — 0.5 reduces malformed tool-call rate
+    # (measured ~16% at default 1.0) while keeping replies natural enough
+    # for spoken conversation.
+    OPENROUTER_TEMPERATURE: float = 0.5
+    # Post-call summary uses a separate, more capable model — latency
+    # doesn't matter here (caller is already gone), accuracy does. Falls
+    # back to OPENROUTER_MODEL if empty.
+    OPENROUTER_SUMMARY_MODEL: str = "openai/gpt-4o-mini"
+    OPENROUTER_SUMMARY_PROVIDER_ORDER: str = ""
+    OPENROUTER_SUMMARY_TEMPERATURE: float = 0.1
 
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"

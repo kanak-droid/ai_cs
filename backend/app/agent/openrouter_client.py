@@ -43,13 +43,23 @@ _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _REQUEST_TIMEOUT_SECONDS = 30.0
 _STREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 _MAX_OUTPUT_TOKENS = 2048
+_SUMMARY_MAX_TOKENS = 800
+
+_http_client: httpx.Client | None = None
 
 
-def _provider_config() -> dict:
-    """Returns optional provider routing shared by all OpenRouter requests."""
-    if not settings.OPENROUTER_PROVIDER_ORDER:
+def _get_http_client() -> httpx.Client:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.Client(timeout=_REQUEST_TIMEOUT_SECONDS)
+    return _http_client
+
+
+def _provider_config(provider_order: str = "") -> dict:
+    order = provider_order or settings.OPENROUTER_PROVIDER_ORDER
+    if not order:
         return {}
-    return {"provider": {"order": settings.OPENROUTER_PROVIDER_ORDER.split(",")}}
+    return {"provider": {"order": order.split(",")}}
 
 
 def _headers() -> dict[str, str]:
@@ -169,14 +179,14 @@ class OpenRouterAgentClient:
             "messages": _contents_to_messages(system, contents),
             "tools": _tools_to_openai(tools),
             "max_tokens": _MAX_OUTPUT_TOKENS,
+            "temperature": settings.OPENROUTER_TEMPERATURE,
         }
         body.update(_provider_config())
 
-        response = httpx.post(
+        response = _get_http_client().post(
             _OPENROUTER_URL,
             headers=_headers(),
             json=body,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         return _parse_response(response.json())
@@ -190,11 +200,12 @@ class OpenRouterAgentClient:
             "messages": _contents_to_messages(system, contents),
             "tools": _tools_to_openai(tools),
             "max_tokens": _MAX_OUTPUT_TOKENS,
+            "temperature": settings.OPENROUTER_TEMPERATURE,
             "stream": True,
         }
         body.update(_provider_config())
 
-        with httpx.stream(
+        with _get_http_client().stream(
             "POST",
             _OPENROUTER_URL,
             headers=_headers(),
@@ -227,38 +238,53 @@ class OpenRouterAgentClient:
 
     def generate_call_summary(self, *, prompt: str) -> str:
         """Returns a compact JSON outcome summary for a completed call."""
+        summary_model = settings.OPENROUTER_SUMMARY_MODEL or settings.OPENROUTER_MODEL
+        summary_provider = settings.OPENROUTER_SUMMARY_PROVIDER_ORDER
         body = {
-            "model": settings.OPENROUTER_MODEL,
+            "model": summary_model,
             "messages": [
                 {
                     "role": "system",
                     "content": (
-                        "You produce accurate customer-support call outcomes. "
-                        "Return only valid JSON with summary, resolution_status, "
-                        "suggested_solution, and next_action string fields."
+                        "You produce accurate, actionable customer-support call outcome "
+                        "summaries for an internal CS dashboard. Return ONLY valid JSON "
+                        "with exactly these four string fields:\n\n"
+                        '- "summary": What specific issue(s) the caller raised, what data '
+                        "the agent looked up (and what it showed), and whether the caller "
+                        "seemed satisfied or frustrated. Be specific — name the actual "
+                        "issue, not just 'a support call was completed'.\n\n"
+                        '- "resolution_status": One of: resolved, follow_up_required, '
+                        "escalated, unknown. Base this on what actually happened — if a "
+                        "support ticket was created, that's 'escalated'. If the agent "
+                        "called mark_issue_resolved, that's 'resolved'. If the caller's "
+                        "problem was answered by data lookup alone and they seemed "
+                        "satisfied, that's 'resolved'.\n\n"
+                        '- "suggested_solution": The specific resolution or advice that '
+                        "was given. Include concrete details (amounts, dates, steps) from "
+                        "the conversation, not generic placeholders.\n\n"
+                        '- "next_action": A concrete, actionable next step for a human CS '
+                        "agent who will call this person back. What specifically should "
+                        "they do or say? Not 'follow up if needed' — instead 'Call back "
+                        "to confirm KYC documents were resubmitted' or 'No action needed "
+                        "— issue fully resolved on call'."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
-            "max_tokens": 400,
+            "max_tokens": _SUMMARY_MAX_TOKENS,
+            "temperature": settings.OPENROUTER_SUMMARY_TEMPERATURE,
             "response_format": {"type": "json_object"},
         }
-        body.update(_provider_config())
-        response = httpx.post(
-            _OPENROUTER_URL, headers=_headers(), json=body, timeout=_REQUEST_TIMEOUT_SECONDS
-        )
+        body.update(_provider_config(summary_provider))
+        client = _get_http_client()
+        response = client.post(_OPENROUTER_URL, headers=_headers(), json=body)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (400, 422):
                 raise
             body.pop("response_format")
-            response = httpx.post(
-                _OPENROUTER_URL,
-                headers=_headers(),
-                json=body,
-                timeout=_REQUEST_TIMEOUT_SECONDS,
-            )
+            response = client.post(_OPENROUTER_URL, headers=_headers(), json=body)
             response.raise_for_status()
         return ((response.json().get("choices") or [{}])[0].get("message") or {}).get(
             "content"
