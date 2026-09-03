@@ -7,6 +7,7 @@ import time
 from app.core.config import settings
 from app.models.call import Call
 from app.models.enums import CallStatus
+from app.services import call_service
 from tests.unit.test_agent_tool_selection import FakeAgentClient, text_response
 
 _AUTH_TOKEN = "test-twilio-auth-token"
@@ -48,6 +49,17 @@ def _relay_setup(call: Call) -> dict:
         "callSid": call.twilio_call_sid,
         "customParameters": {"call_token": call.relay_token},
     }
+
+
+def _receive_spoken_turn(ws) -> str:
+    """Collects ConversationRelay's streamed text chunks until turn completion."""
+    chunks = []
+    while True:
+        message = ws.receive_json()
+        assert message["type"] == "text"
+        chunks.append(message["token"])
+        if message["last"]:
+            return "".join(chunks)
 
 
 def test_request_call_requires_auth(client):
@@ -126,6 +138,40 @@ def test_status_callback_marks_call_ended(client, db_session, seeded_astrologer,
     db_session.refresh(call)
     assert call.status == CallStatus.ENDED
     assert call.ended_at is not None
+    assert call.support_summary is not None
+    assert call.resolution_status == "not_connected"
+
+
+def test_call_outcome_uses_openrouter_and_persists_dashboard_fields(
+    db_session, seeded_astrologer, monkeypatch
+):
+    call = _seed_call(db_session, seeded_astrologer)
+    call.transcript = "Astrologer: My payout is delayed.\nAgent: It is scheduled for Friday."
+    call.actions_taken = [{"tool": "get_payout_status", "ok": True, "summary": "Payout found"}]
+    db_session.commit()
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+
+    class _SummaryClient:
+        def generate_call_summary(self, *, prompt):
+            assert "Payout found" in prompt
+            return (
+                '{"summary":"The caller asked about a delayed payout.",'
+                '"resolution_status":"resolved",'
+                '"suggested_solution":"Wait for the scheduled payout.",'
+                '"next_action":"No follow-up needed."}'
+            )
+
+    monkeypatch.setattr(
+        "app.services.call_service.get_voice_agent_client", lambda: _SummaryClient()
+    )
+    call_service.generate_call_outcome_summary(db_session, call)
+
+    db_session.refresh(call)
+    assert call.support_summary == "The caller asked about a delayed payout."
+    assert call.resolution_status == "resolved"
+    assert call.suggested_solution == "Wait for the scheduled payout."
+    assert call.next_action == "No follow-up needed."
+    assert call.summary_generated_at is not None
 
 
 def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
@@ -141,9 +187,9 @@ def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
     ) as ws:
         ws.send_json(_relay_setup(call))
         ws.send_json({"type": "prompt", "voicePrompt": "What is my payout status?", "last": True})
-        reply = ws.receive_json()
+        reply = _receive_spoken_turn(ws)
 
-    assert reply == {"type": "text", "token": "Your payout is scheduled for the 5th.", "last": True}
+    assert reply == "Your payout is scheduled for the 5th."
     db_session.refresh(call)
     assert "What is my payout status?" in call.transcript
     assert "Your payout is scheduled for the 5th." in call.transcript
@@ -169,9 +215,9 @@ def test_conversation_relay_discards_reply_after_interrupt(
         fast_client = FakeAgentClient([text_response("Real reply to the second question")])
         monkeypatch.setattr("app.services.call_service.get_voice_agent_client", lambda: fast_client)
         ws.send_json({"type": "prompt", "voicePrompt": "second question", "last": True})
-        reply = ws.receive_json()
+        reply = _receive_spoken_turn(ws)
 
-    assert reply == {"type": "text", "token": "Real reply to the second question", "last": True}
+    assert reply == "Real reply to the second question"
 
 
 def test_conversation_relay_websocket_rejects_unsigned_upgrade(

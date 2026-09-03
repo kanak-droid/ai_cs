@@ -167,16 +167,51 @@ async def conversation_relay(
         async with lock:
             if my_turn_id != turn_id:
                 return  # superseded before we even started this turn's work
-            try:
-                reply = await asyncio.to_thread(
-                    call_service.run_conversation_turn, db, call, ctx, history, user_message
+            token_queue: asyncio.Queue[str] = asyncio.Queue()
+            event_loop = asyncio.get_running_loop()
+
+            def enqueue_token(token: str) -> None:
+                """Safely forwards a blocking OpenRouter SSE chunk to this loop."""
+                if token:
+                    event_loop.call_soon_threadsafe(token_queue.put_nowait, token)
+
+            generation_task = asyncio.create_task(
+                asyncio.to_thread(
+                    call_service.stream_conversation_turn,
+                    db,
+                    call,
+                    ctx,
+                    history,
+                    user_message,
+                    on_token=enqueue_token,
                 )
+            )
+            try:
+                while not generation_task.done():
+                    try:
+                        token = await asyncio.wait_for(token_queue.get(), timeout=0.05)
+                    except TimeoutError:
+                        continue
+                    if my_turn_id == turn_id:
+                        await websocket.send_json({"type": "text", "token": token, "last": False})
+                await generation_task
+                while not token_queue.empty():
+                    token = token_queue.get_nowait()
+                    if my_turn_id == turn_id:
+                        await websocket.send_json({"type": "text", "token": token, "last": False})
             except Exception:
                 logger.exception("Turn failed for call %s", call.id)
-                reply = "Sorry, I'm having trouble right now — could you say that again?"
+                if my_turn_id == turn_id:
+                    await websocket.send_json(
+                        {
+                            "type": "text",
+                            "token": "Sorry, I'm having trouble right now — could you say that again?",
+                            "last": False,
+                        }
+                    )
         if my_turn_id != turn_id:
             return  # caller interrupted or spoke again while this was generating — never speak a stale reply
-        await websocket.send_json({"type": "text", "token": reply, "last": True})
+        await websocket.send_json({"type": "text", "token": "", "last": True})
 
     try:
         while True:

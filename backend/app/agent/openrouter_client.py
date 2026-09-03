@@ -29,10 +29,12 @@ translate around:
 
 import json
 import logging
+from collections.abc import Iterator
 
 import httpx
 from google.genai import types
 
+from app.agent.client import StreamDelta, StreamToolCallDelta
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,21 @@ logger = logging.getLogger(__name__)
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 _REQUEST_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_TOKENS = 2048
+
+
+def _provider_config() -> dict:
+    """Returns optional provider routing shared by all OpenRouter requests."""
+    if not settings.OPENROUTER_PROVIDER_ORDER:
+        return {}
+    return {"provider": {"order": settings.OPENROUTER_PROVIDER_ORDER.split(",")}}
+
+
+def _headers() -> dict[str, str]:
+    """Builds the standard authenticated OpenRouter request headers."""
+    return {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
 
 def _tools_to_openai(tools: list[types.Tool]) -> list[dict]:
@@ -152,27 +169,101 @@ class OpenRouterAgentClient:
             "tools": _tools_to_openai(tools),
             "max_tokens": _MAX_OUTPUT_TOKENS,
         }
-        if settings.OPENROUTER_PROVIDER_ORDER:
-            # Without this, OpenRouter picks among whichever providers host
-            # this model slug by its own policy — for a latency-sensitive
-            # phone call that's a real problem, since the same model can be
-            # served by providers with very different inference speed
-            # (e.g. Groq's LPU inference vs. a standard hosted endpoint,
-            # measured live 2026-09-04 at roughly 3x faster for this
-            # account's default model). Forcing the order pins it down.
-            body["provider"] = {"order": settings.OPENROUTER_PROVIDER_ORDER.split(",")}
+        body.update(_provider_config())
 
         response = httpx.post(
             _OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
+            headers=_headers(),
             json=body,
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         return _parse_response(response.json())
+
+    def stream_generate(
+        self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
+    ) -> Iterator[StreamDelta]:
+        """Streams OpenRouter SSE response fragments for a voice turn."""
+        body = {
+            "model": settings.OPENROUTER_MODEL,
+            "messages": _contents_to_messages(system, contents),
+            "tools": _tools_to_openai(tools),
+            "max_tokens": _MAX_OUTPUT_TOKENS,
+            "stream": True,
+        }
+        body.update(_provider_config())
+
+        with httpx.stream(
+            "POST",
+            _OPENROUTER_URL,
+            headers=_headers(),
+            json=body,
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                payload = line.removeprefix("data: ")
+                if payload == "[DONE]":
+                    return
+                chunk = json.loads(payload)
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                tool_calls = tuple(
+                    StreamToolCallDelta(
+                        index=tool_call.get("index", 0),
+                        name=(tool_call.get("function") or {}).get("name"),
+                        arguments=(tool_call.get("function") or {}).get("arguments"),
+                    )
+                    for tool_call in delta.get("tool_calls") or []
+                )
+                text = delta.get("content") or ""
+                if text or tool_calls:
+                    yield StreamDelta(text=text, tool_calls=tool_calls)
+
+    def generate_call_summary(self, *, prompt: str) -> str:
+        """Returns a compact JSON outcome summary for a completed call."""
+        body = {
+            "model": settings.OPENROUTER_MODEL,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You produce accurate customer-support call outcomes. "
+                        "Return only valid JSON with summary, resolution_status, "
+                        "suggested_solution, and next_action string fields."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 400,
+            "response_format": {"type": "json_object"},
+        }
+        body.update(_provider_config())
+        response = httpx.post(
+            _OPENROUTER_URL, headers=_headers(), json=body, timeout=_REQUEST_TIMEOUT_SECONDS
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            # A few OpenRouter providers do not implement JSON mode. The
+            # prompt still requests JSON, so retrying without response_format
+            # keeps end-of-call summaries available instead of dropping to
+            # the deterministic fallback unnecessarily.
+            body.pop("response_format")
+            response = httpx.post(
+                _OPENROUTER_URL,
+                headers=_headers(),
+                json=body,
+                timeout=_REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        return ((response.json().get("choices") or [{}])[0].get("message") or {}).get(
+            "content"
+        ) or "{}"
 
 
 def get_voice_agent_client() -> OpenRouterAgentClient:

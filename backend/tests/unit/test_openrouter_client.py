@@ -10,7 +10,7 @@ from app.agent.openrouter_client import (
     _parse_response,
     _tools_to_openai,
 )
-from app.agent.orchestrator import HistoryTurn, run_chat_turn
+from app.agent.orchestrator import run_chat_turn
 from app.core.config import settings
 from tests.unit.test_agent_tool_selection import make_ctx
 
@@ -133,6 +133,54 @@ class _FakeHttpResponse:
 
     def json(self) -> dict:
         return self._body
+
+
+class _FakeStreamResponse:
+    """Context-managed SSE response used to test OpenRouter chunk parsing."""
+
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def iter_lines(self):
+        yield from self._lines
+
+
+def test_openrouter_client_parses_text_and_tool_sse_chunks(monkeypatch):
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    lines = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"get_payout_status","arguments":"{}"}}]}}]}',
+        'data: {"choices":[{"delta":{"content":"Your payout is "}}]}',
+        'data: {"choices":[{"delta":{"content":"scheduled."}}]}',
+        "data: [DONE]",
+    ]
+
+    def fake_stream(method, url, **kwargs):
+        assert method == "POST"
+        assert url == "https://openrouter.ai/api/v1/chat/completions"
+        assert kwargs["json"]["stream"] is True
+        return _FakeStreamResponse(lines)
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    chunks = list(
+        OpenRouterAgentClient().stream_generate(
+            system="system",
+            contents=[types.Content(role="user", parts=[types.Part(text="hello")])],
+            tools=[],
+        )
+    )
+
+    assert chunks[0].tool_calls[0].name == "get_payout_status"
+    assert chunks[0].tool_calls[0].arguments == "{}"
+    assert [chunk.text for chunk in chunks[1:]] == ["Your payout is ", "scheduled."]
 
 
 def test_openrouter_client_end_to_end_through_orchestrator(db_session, monkeypatch):

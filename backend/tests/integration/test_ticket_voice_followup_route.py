@@ -72,3 +72,29 @@ def test_ticket_creation_can_schedule_a_followup_call_when_enabled(
     call = db_session.query(Call).filter_by(ticket_id=ticket.id).one()
     assert call.triggered_by == "ticket_created"
     assert call.twilio_call_sid is not None
+
+
+def test_admin_voice_call_queue_exposes_completed_support_outcome(
+    client, db_session, seeded_astrologer, admin_auth_header
+):
+    call = Call(
+        astrologer_id=seeded_astrologer.id,
+        phone_number=seeded_astrologer.phone,
+        triggered_by="user_request",
+        relay_token="queue-call-token",
+        support_summary="The payout date was explained.",
+        resolution_status="resolved",
+        suggested_solution="Wait for the scheduled payout.",
+        next_action="No further action required.",
+        actions_taken=[{"tool": "get_payout_status", "ok": True, "summary": "Payout found"}],
+    )
+    db_session.add(call)
+    db_session.commit()
+
+    response = client.get("/api/admin/voice-calls", headers=admin_auth_header)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["id"] == call.id
+    assert body[0]["support_summary"] == "The payout date was explained."
+    assert body[0]["resolution_status"] == "resolved"

@@ -25,6 +25,15 @@ from app.services import call_service, ticket_service
 router = APIRouter(tags=["admin"])
 
 
+@router.get("/api/admin/voice-calls", response_model=list[CallRead])
+def list_recent_voice_calls(
+    admin: AdminContext = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> list[CallRead]:
+    """Returns recent call outcomes for the customer-support dashboard."""
+    return [CallRead.model_validate(call) for call in call_service.list_recent_calls(db)]
+
+
 @router.get("/api/admin/tickets", response_model=list[AdminTicketRead])
 def list_tickets(
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
@@ -109,8 +118,12 @@ def get_ticket_attachment_preview_url(
     """
     ticket = ticket_service.get_ticket(db, ticket_id)
     if not ticket.attachment_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No attachment on this ticket")
-    return AttachmentPreviewResponse(preview_url=object_storage.generate_preview_url(ticket.attachment_url))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No attachment on this ticket"
+        )
+    return AttachmentPreviewResponse(
+        preview_url=object_storage.generate_preview_url(ticket.attachment_url)
+    )
 
 
 @router.patch("/api/admin/tickets/{ticket_id}", response_model=AdminTicketRead)

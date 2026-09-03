@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, String, Text
+from sqlalchemy import JSON, Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.time import utcnow
@@ -61,6 +61,14 @@ class Call(Base):
     # same call as chat_session_service.record_message not needing a
     # separate table until the admin dashboard needs per-line filtering.
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Structured end-of-call outcome for the support dashboard. All fields
+    # are nullable so historical calls remain readable after the migration.
+    support_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    suggested_solution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actions_taken: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    summary_generated_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     # Set if the AI agent called create_support_ticket mid-call (same tool,
     # same executor path as chat — see app/agent/tool_registry.py) so the

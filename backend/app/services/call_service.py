@@ -17,29 +17,28 @@ app/api/routes/voice.py's WebSocket handler owns the conversation's
 SessionContext/history for the connection's lifetime and calls
 run_conversation_turn once per caller utterance.
 
-Latency, reported live 2026-09-04: run_conversation_turn is NOT
-streamed — it waits for the whole reply (including any tool-call round
-trip) before returning, and the WebSocket handler sends it to
-ConversationRelay as one text message, so TTS can't start speaking the
-first sentence while the rest is still being generated. speechTimeout
-below is tuned down from Twilio's cautious "auto" default as a partial,
-low-risk mitigation; true token-level streaming through the tool-calling
-loop would help more but is a real orchestrator-level redesign, not
-attempted here yet.
+Voice turns use OpenRouter server-sent events: tool-only completions stay
+inside the backend, while final spoken-answer chunks are sent to
+ConversationRelay immediately. This lets TTS begin before the full reply
+is complete. End-of-call outcomes use the same provider and are stored on
+the Call row for the customer-support dashboard.
 """
 
+import json
 import logging
 import re
 import secrets
+from collections.abc import Callable
+from typing import cast
 from xml.sax.saxutils import escape
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agent.client import AgentClient
+from app.agent.client import AgentClient, StreamingAgentClient
 from app.agent.context import SessionContext
 from app.agent.openrouter_client import get_voice_agent_client
-from app.agent.orchestrator import HistoryTurn, run_chat_turn
+from app.agent.orchestrator import HistoryTurn, run_chat_turn, run_streaming_chat_turn
 from app.core.config import settings
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.security import AstrologerContext
@@ -120,6 +119,8 @@ _STATUS_FROM_TWILIO = {
     "canceled": CallStatus.FAILED,
 }
 _TERMINAL_TWILIO_STATUSES = {"completed", "busy", "failed", "no-answer", "canceled"}
+_OUTCOME_STATUSES = {"resolved", "follow_up_required", "escalated", "unknown", "not_connected"}
+_SUMMARY_TRANSCRIPT_LIMIT = 12_000
 
 
 def _create_call(
@@ -212,6 +213,11 @@ def list_calls_for_ticket(db: Session, *, ticket_id: int) -> list[Call]:
     )
 
 
+def list_recent_calls(db: Session, *, limit: int = 100) -> list[Call]:
+    """Returns recent phone calls for the support dashboard's call queue."""
+    return list(db.scalars(select(Call).order_by(Call.created_at.desc()).limit(limit)))
+
+
 def verify_twilio_call_sid(call: Call, call_sid: str | None) -> None:
     """Rejects a webhook/relay event whose Call SID is not this call's SID."""
     if not call_sid or call_sid != call.twilio_call_sid:
@@ -299,6 +305,43 @@ def start_conversation(db: Session, call_id: int) -> tuple[Call, SessionContext,
     return call, ctx, history
 
 
+def _ticket_context(call: Call) -> str:
+    """Builds the ticket-only context appended to a proactive voice turn."""
+    if call.ticket is None:
+        return ""
+    return (
+        f" This is a proactive follow-up about support ticket #{call.ticket.id}. "
+        f"Its category is '{call.ticket.category}' and the reported issue is "
+        f"'{call.ticket.description}'. Acknowledge that context without claiming it is resolved."
+    )
+
+
+def _persist_conversation_turn(
+    db: Session,
+    *,
+    call: Call,
+    history: list[HistoryTurn],
+    user_message: str,
+    reply: str,
+    trace: list,
+    metadata: dict,
+) -> str:
+    """Stores one completed voice turn and its tool actions on the call."""
+    clean_reply = _strip_markdown(reply)
+    history.append(HistoryTurn(role="astrologer", text=user_message))
+    history.append(HistoryTurn(role="assistant", text=clean_reply))
+    call.transcript = (
+        call.transcript or ""
+    ) + f"\nAstrologer: {user_message}\nAgent: {clean_reply}"
+    actions = list(call.actions_taken or [])
+    actions.extend({"tool": step.tool, "ok": step.ok, "summary": step.summary} for step in trace)
+    call.actions_taken = actions or None
+    if metadata.get("created_ticket_id"):
+        call.created_ticket_id = metadata["created_ticket_id"]
+    db.commit()
+    return clean_reply
+
+
 def run_conversation_turn(
     db: Session,
     call: Call,
@@ -315,13 +358,7 @@ def run_conversation_turn(
     per-request history param but accumulated locally instead of resent by
     the client every time.
     """
-    ticket_context = ""
-    if call.ticket is not None:
-        ticket_context = (
-            f" This is a proactive follow-up about support ticket #{call.ticket.id}. "
-            f"Its category is '{call.ticket.category}' and the reported issue is "
-            f"'{call.ticket.description}'. Acknowledge that context without claiming it is resolved."
-        )
+    ticket_context = _ticket_context(call)
     result = run_chat_turn(
         client or get_voice_agent_client(),
         ctx,
@@ -329,15 +366,127 @@ def run_conversation_turn(
         history=history,
         extra_instructions=f"{_VOICE_INSTRUCTIONS}{ticket_context}",
     )
-    reply = _strip_markdown(result.reply)
-    history.append(HistoryTurn(role="astrologer", text=user_message))
-    history.append(HistoryTurn(role="assistant", text=reply))
+    return _persist_conversation_turn(
+        db,
+        call=call,
+        history=history,
+        user_message=user_message,
+        reply=result.reply,
+        trace=result.trace,
+        metadata=result.metadata,
+    )
 
-    call.transcript = (call.transcript or "") + f"\nAstrologer: {user_message}\nAgent: {reply}"
-    if result.metadata.get("created_ticket_id"):
-        call.created_ticket_id = result.metadata["created_ticket_id"]
+
+def stream_conversation_turn(
+    db: Session,
+    call: Call,
+    ctx: SessionContext,
+    history: list[HistoryTurn],
+    user_message: str,
+    *,
+    on_token: Callable[[str], None],
+    client: AgentClient | None = None,
+) -> str:
+    """Streams a final model answer while retaining the same secure tools.
+
+    Test clients and any future non-streaming provider gracefully use the
+    original complete-response path, so availability does not depend on SSE.
+    """
+    agent_client = client or get_voice_agent_client()
+    instructions = f"{_VOICE_INSTRUCTIONS}{_ticket_context(call)}"
+    if hasattr(agent_client, "stream_generate"):
+        result = run_streaming_chat_turn(
+            cast(StreamingAgentClient, agent_client),
+            ctx,
+            user_message,
+            history=history,
+            extra_instructions=instructions,
+            on_text=lambda token: on_token(_strip_markdown(token)),
+        )
+    else:
+        result = run_chat_turn(
+            agent_client,
+            ctx,
+            user_message,
+            history=history,
+            extra_instructions=instructions,
+        )
+        on_token(_strip_markdown(result.reply))
+
+    return _persist_conversation_turn(
+        db,
+        call=call,
+        history=history,
+        user_message=user_message,
+        reply=result.reply,
+        trace=result.trace,
+        metadata=result.metadata,
+    )
+
+
+def _fallback_call_outcome(call: Call) -> dict[str, str]:
+    """Returns a useful dashboard outcome when LLM summarization is unavailable."""
+    transcript = (call.transcript or "").strip()
+    if not transcript:
+        return {
+            "summary": "The call ended without a recorded conversation.",
+            "resolution_status": "not_connected",
+            "suggested_solution": "No solution could be discussed.",
+            "next_action": "Try contacting the customer again.",
+        }
+    last_agent_reply = transcript.rsplit("Agent:", maxsplit=1)[-1].strip()
+    return {
+        "summary": "A support call was completed. Review the transcript for the full discussion.",
+        "resolution_status": "unknown",
+        "suggested_solution": last_agent_reply or "No specific solution was captured.",
+        "next_action": "Review the call and follow up if the issue remains unresolved.",
+    }
+
+
+def _normalise_call_outcome(raw_summary: str, call: Call) -> dict[str, str]:
+    """Validates model JSON and fills omissions with deterministic defaults."""
+    fallback = _fallback_call_outcome(call)
+    try:
+        parsed = json.loads(raw_summary)
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(parsed, dict):
+        return fallback
+    outcome = {
+        field: str(parsed.get(field) or fallback[field]).strip()
+        for field in ("summary", "resolution_status", "suggested_solution", "next_action")
+    }
+    if outcome["resolution_status"] not in _OUTCOME_STATUSES:
+        outcome["resolution_status"] = fallback["resolution_status"]
+    return outcome
+
+
+def generate_call_outcome_summary(db: Session, call: Call) -> None:
+    """Generates the customer-support dashboard outcome exactly once per call."""
+    if call.summary_generated_at is not None:
+        return
+    fallback = _fallback_call_outcome(call)
+    outcome = fallback
+    if settings.OPENROUTER_API_KEY and call.transcript:
+        prompt = (
+            "Summarize this completed customer-support phone call for an internal dashboard. "
+            "Do not invent facts. resolution_status must be one of: resolved, follow_up_required, "
+            "escalated, unknown.\n\n"
+            f"Actions taken: {json.dumps(call.actions_taken or [])}\n\n"
+            f"Transcript:\n{call.transcript[-_SUMMARY_TRANSCRIPT_LIMIT:]}"
+        )
+        try:
+            raw_summary = get_voice_agent_client().generate_call_summary(prompt=prompt)
+            outcome = _normalise_call_outcome(raw_summary, call)
+        except Exception:
+            logger.exception("Call outcome generation failed for call %s", call.id)
+
+    call.support_summary = outcome["summary"]
+    call.resolution_status = outcome["resolution_status"]
+    call.suggested_solution = outcome["suggested_solution"]
+    call.next_action = outcome["next_action"]
+    call.summary_generated_at = utcnow()
     db.commit()
-    return reply
 
 
 def handle_status_callback(db: Session, call_id: int, twilio_status: str) -> None:
@@ -362,3 +511,5 @@ def handle_status_callback(db: Session, call_id: int, twilio_status: str) -> Non
         if twilio_status != "completed":
             call.ended_reason = twilio_status
     db.commit()
+    if twilio_status in _TERMINAL_TWILIO_STATUSES:
+        generate_call_outcome_summary(db, call)

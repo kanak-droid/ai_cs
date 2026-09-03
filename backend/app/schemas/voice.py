@@ -32,9 +32,15 @@ class CallRead(BaseModel):
     status: CallStatus
     ended_reason: str | None = None
     transcript: str | None = None
+    support_summary: str | None = None
+    resolution_status: str | None = None
+    suggested_solution: str | None = None
+    next_action: str | None = None
+    actions_taken: list[dict] | None = None
     created_ticket_id: int | None = None
     created_at: datetime
     ended_at: datetime | None = None
+    summary_generated_at: datetime | None = None
 
 
 class TicketFollowupCallRequest(BaseModel):
