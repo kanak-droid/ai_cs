@@ -25,15 +25,6 @@ from app.services import call_service, ticket_service
 router = APIRouter(tags=["admin"])
 
 
-@router.get("/api/admin/voice-calls", response_model=list[CallRead])
-def list_recent_voice_calls(
-    admin: AdminContext = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-) -> list[CallRead]:
-    """Returns recent call outcomes for the customer-support dashboard."""
-    return [CallRead.model_validate(call) for call in call_service.list_recent_calls(db)]
-
-
 @router.get("/api/admin/tickets", response_model=list[AdminTicketRead])
 def list_tickets(
     status_filter: TicketStatus | None = Query(default=None, alias="status"),
