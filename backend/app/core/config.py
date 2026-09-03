@@ -137,27 +137,35 @@ class Settings(BaseSettings):
     # bearer secret, same convention as everything else in this app.
     ZOHO_WEBHOOK_SECRET: str = ""
 
-    # AI phone support, via Vapi (voice_client.py) — Vapi owns telephony/
-    # STT/TTS/interruption-handling; we only supply the "brain" through its
-    # Custom LLM feature (assistant.model.url points at our
-    # /api/voice/custom-llm) and receive lifecycle events on
-    # /api/voice/events. Own mock switch, same reasoning as
-    # SLACK_MOCK_MODE — request-call logs a Call row and returns a fake
-    # vapi_call_id instead of actually dialing.
+    # AI phone support, directly on Twilio Voice + ConversationRelay
+    # (voice_client.py) — no third-party voice-AI platform (Vapi) in the
+    # loop; Twilio itself owns telephony/STT/TTS/interruption-handling via
+    # ConversationRelay, and streams transcribed caller speech to us over a
+    # WebSocket (/api/voice/conversation-relay), to which we reply with
+    # plain text. Own mock switch, same reasoning as SLACK_MOCK_MODE —
+    # request-call logs a Call row and returns a fake twilio_call_sid
+    # instead of actually dialing.
     VOICE_MOCK_MODE: bool = True
-    VAPI_API_KEY: str = ""
-    VAPI_PHONE_NUMBER_ID: str = ""
-    VAPI_ASSISTANT_ID: str = ""
-    # Shared secret Vapi is configured to send back on every request to our
-    # webhooks (as a header, exact name set alongside the server URL in the
-    # Vapi dashboard/assistant config) — same bearer-secret convention as
-    # ZOHO_WEBHOOK_SECRET, checked in app/api/routes/voice.py before trusting
-    # any inbound payload.
-    VAPI_WEBHOOK_SECRET: str = ""
-    # Where Vapi's Custom LLM feature and server-URL events reach this
-    # backend — must be a publicly reachable URL (Vapi is a third-party
-    # service, not on our network), so this is never localhost outside of a
-    # tunnel (ngrok/etc.) during local dev.
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    # The Twilio number calls are placed FROM (E.164, e.g. "+17372212163")
+    # — must have Voice capability and a real balance behind it; a
+    # trial-only number without funds can't complete real calls.
+    TWILIO_PHONE_NUMBER: str = ""
+    # Extra shared secret embedded in the TwiML-fetch URL's query string and
+    # the wss:// ConversationRelay URL (both built in voice_client.py) —
+    # Twilio's own request signature (validated via the `twilio` SDK's
+    # RequestValidator, using TWILIO_AUTH_TOKEN as the signing secret)
+    # already authenticates the two plain HTTP webhooks below, but a
+    # WebSocket upgrade request isn't covered by that same signature scheme,
+    # so this is the WebSocket route's only real defense — checked in
+    # app/api/routes/voice.py before accepting the connection or trusting
+    # the TwiML-fetch/status-callback requests.
+    TWILIO_WEBHOOK_SECRET: str = ""
+    # Where Twilio fetches TwiML, posts call-status events, and opens the
+    # ConversationRelay WebSocket — must be a publicly reachable https/wss
+    # URL (Twilio is a third-party service, not on our network), so this is
+    # never localhost outside of a tunnel (ngrok/etc.) during local dev.
     VOICE_PUBLIC_BASE_URL: str = "http://localhost:8000"
 
     # The phone agent's LLM — OpenRouter (https://openrouter.ai), not

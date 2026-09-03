@@ -1,53 +1,49 @@
-# AI phone support via Vapi (https://vapi.ai). Vapi owns the phone number,
-# telephony, STT, TTS, and interruption/turn-taking — we only (a) ask it to
-# dial out, via this file, and (b) supply the "brain" for each turn, via
-# app/api/routes/voice.py's Custom LLM endpoint, which vapi_call_id below
-# lets us route back to the right astrologer/Call row.
+# AI phone support directly on Twilio Voice + ConversationRelay — no
+# third-party voice-AI platform in the loop. Twilio owns telephony, STT,
+# TTS, and interruption/turn-taking (via ConversationRelay); this file only
+# asks Twilio to dial out. The "brain" lives on our side: Twilio streams
+# transcribed caller speech to /api/voice/conversation-relay (a WebSocket —
+# see app/api/routes/voice.py), we reply with plain text, ConversationRelay
+# speaks it.
 #
 # Has its own mock switch (VOICE_MOCK_MODE), independent of the shared
 # MOCK_MODE, same reasoning as SLACK_MOCK_MODE/N8N_MOCK_MODE — going real
-# needs a funded Vapi account + a phone number + an assistant configured
-# with a Custom LLM model pointed at {VOICE_PUBLIC_BASE_URL}/api/voice/
-# custom-llm, none of which exist yet.
+# needs a funded Twilio account with a real Voice-capable number, which
+# doesn't exist by default.
 import uuid
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
-import httpx
+from twilio.rest import Client
 
 from app.core.config import settings
-
-_VAPI_BASE_URL = "https://api.vapi.ai"
-_REQUEST_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
 class OutboundCallResult:
-    vapi_call_id: str
+    twilio_call_sid: str
     status: str
 
 
-def _real_create_call(phone_number: str) -> OutboundCallResult:
-    response = httpx.post(
-        f"{_VAPI_BASE_URL}/call",
-        headers={"Authorization": f"Bearer {settings.VAPI_API_KEY}"},
-        json={
-            "assistantId": settings.VAPI_ASSISTANT_ID,
-            "phoneNumberId": settings.VAPI_PHONE_NUMBER_ID,
-            "customer": {"number": phone_number},
-        },
-        timeout=_REQUEST_TIMEOUT_SECONDS,
+def _real_create_call(phone_number: str, call_id: int) -> OutboundCallResult:
+    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    query = urlencode({"call_id": call_id, "secret": settings.TWILIO_WEBHOOK_SECRET})
+    call = client.calls.create(
+        to=phone_number,
+        from_=settings.TWILIO_PHONE_NUMBER,
+        url=f"{settings.VOICE_PUBLIC_BASE_URL}/api/voice/twiml?{query}",
+        status_callback=f"{settings.VOICE_PUBLIC_BASE_URL}/api/voice/status-callback?{query}",
+        status_callback_event=["initiated", "ringing", "answered", "completed"],
     )
-    response.raise_for_status()
-    body = response.json()
-    return OutboundCallResult(vapi_call_id=body["id"], status=body.get("status", "queued"))
+    return OutboundCallResult(twilio_call_sid=call.sid, status=call.status)
 
 
-def create_call(phone_number: str, astrologer_id: int) -> OutboundCallResult:
+def create_call(phone_number: str, call_id: int) -> OutboundCallResult:
     if not settings.VOICE_MOCK_MODE:
-        return _real_create_call(phone_number)
+        return _real_create_call(phone_number, call_id)
 
-    # Mock fallback. Unlike n8n_client's fake URL, this can't be a
-    # deterministic hash of astrologer_id alone — Call.vapi_call_id is
-    # unique, and the same astrologer requesting a second demo call would
-    # collide — so it's a fresh id per call, still clearly marked as mock.
-    return OutboundCallResult(vapi_call_id=f"mock-call-{astrologer_id}-{uuid.uuid4().hex[:8]}", status="queued")
+    # Mock fallback. A fresh id per call, not a hash of call_id alone —
+    # Call.twilio_call_sid is unique, and Twilio's real CallSid format
+    # ("CA" + 32 hex chars) is mimicked loosely so mock rows are
+    # recognizable at a glance without being mistaken for a real one.
+    return OutboundCallResult(twilio_call_sid=f"CAmock{uuid.uuid4().hex[:30]}", status="queued")

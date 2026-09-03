@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -14,36 +16,38 @@ class RequestCallResponse(BaseModel):
     status: str
 
 
-class VapiChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class VapiCustomLLMRequest(BaseModel):
-    """Vapi's Custom LLM feature POSTs an OpenAI chat/completions-shaped
-    body here for every assistant turn. The exact placement of call context
-    on this payload wasn't confirmed against a live Vapi account as of
-    2026-09-03 (Vapi's own docs describe it only loosely) — `call` is
-    typed loose (plain dict) so the route can read whatever subset of
-    `call.id` actually shows up rather than failing schema validation on a
-    field we guessed wrong. See call_service.handle_custom_llm_turn for how
-    the call is actually resolved (by matching `call.id` against our own
-    Call.vapi_call_id, not by trusting any echoed metadata).
+class ConversationRelaySetupMessage(BaseModel):
+    """First message Twilio sends when the ConversationRelay WebSocket
+    connects — see https://www.twilio.com/docs/voice/conversationrelay/websocket-messages.
+    customParameters carries whatever <Parameter> elements voice_client's
+    TwiML included, which is how call_id reaches us here too (redundant
+    with the call_id query param on the wss:// URL itself, on purpose —
+    two independent ways to resolve the same Call row).
     """
 
-    messages: list[VapiChatMessage]
-    call: dict = {}
-    stream: bool = False
+    type: Literal["setup"]
+    callSid: str
+    customParameters: dict[str, str] = {}
 
 
-class VapiChatCompletionChoice(BaseModel):
-    index: int = 0
-    message: VapiChatMessage
-    finish_reason: str = "stop"
+class ConversationRelayPromptMessage(BaseModel):
+    """One finalized (or partial, if `last` is False) chunk of the caller's
+    transcribed speech. We only act on `last=True` chunks — see
+    call_service's ConversationRelay turn loop.
+    """
+
+    type: Literal["prompt"]
+    voicePrompt: str
+    lang: str = "en-US"
+    last: bool = True
 
 
-class VapiChatCompletionResponse(BaseModel):
-    id: str
-    object: str = "chat.completion"
-    model: str = "astrohelp-agent"
-    choices: list[VapiChatCompletionChoice]
+class ConversationRelayInterruptMessage(BaseModel):
+    type: Literal["interrupt"]
+    utteranceUntilInterrupt: str = ""
+    durationUntilInterruptMs: int = 0
+
+
+class ConversationRelayDtmfMessage(BaseModel):
+    type: Literal["dtmf"]
+    digit: str

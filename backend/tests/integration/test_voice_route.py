@@ -1,9 +1,39 @@
+import base64
+import hashlib
+import hmac
+
 from app.core.config import settings
 from app.models.call import Call
 from app.models.enums import CallStatus
 from tests.unit.test_agent_tool_selection import FakeAgentClient, text_response
 
-_SECRET = "test-vapi-secret"
+_SECRET = "test-webhook-secret"
+_AUTH_TOKEN = "test-twilio-auth-token"
+
+
+def _sign(url: str, params: dict) -> str:
+    """Reimplements Twilio's own request-signing algorithm (HMAC-SHA1 over
+    the URL plus each POST param's key+value, sorted by key, base64
+    encoded) purely to construct a validly-signed test request — the
+    production code under test (app.api.routes.voice._check_twilio_signature)
+    verifies via the official `twilio` SDK's RequestValidator, not this.
+    See https://www.twilio.com/docs/usage/webhooks/webhooks-security.
+    """
+    body = url + "".join(f"{k}{params[k]}" for k in sorted(params))
+    mac = hmac.new(_AUTH_TOKEN.encode(), body.encode(), hashlib.sha1)
+    return base64.b64encode(mac.digest()).decode()
+
+
+def _seed_call(db_session, seeded_astrologer, twilio_call_sid="CA" + "0" * 32):
+    call = Call(
+        astrologer_id=seeded_astrologer.id,
+        phone_number=seeded_astrologer.phone,
+        twilio_call_sid=twilio_call_sid,
+        status=CallStatus.IN_PROGRESS,
+    )
+    db_session.add(call)
+    db_session.commit()
+    return call
 
 
 def test_request_call_requires_auth(client):
@@ -22,114 +52,109 @@ def test_request_call_creates_a_queued_call(client, db_session, seeded_astrologe
     assert call.astrologer_id == seeded_astrologer.id
     assert call.phone_number == seeded_astrologer.phone
     assert call.session_id == "sess-1"
-    assert call.vapi_call_id is not None  # mocked, but always set
+    assert call.twilio_call_sid is not None  # mocked, but always set
     assert call.status == CallStatus.QUEUED
 
 
-def _seed_call(db_session, seeded_astrologer, vapi_call_id="vapi-call-abc"):
-    call = Call(
-        astrologer_id=seeded_astrologer.id,
-        phone_number=seeded_astrologer.phone,
-        vapi_call_id=vapi_call_id,
-        status=CallStatus.IN_PROGRESS,
-    )
-    db_session.add(call)
-    db_session.commit()
-    return call
+def test_twiml_rejects_wrong_secret(client, db_session, seeded_astrologer, monkeypatch):
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
+    call = _seed_call(db_session, seeded_astrologer)
+
+    response = client.post(f"/api/voice/twiml?call_id={call.id}&secret=wrong")
+
+    assert response.status_code == 403
 
 
-def test_custom_llm_rejects_wrong_secret(client, db_session, seeded_astrologer, monkeypatch):
-    monkeypatch.setattr(settings, "VAPI_WEBHOOK_SECRET", _SECRET)
+def test_twiml_rejects_bad_signature(client, db_session, seeded_astrologer, monkeypatch):
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", _AUTH_TOKEN)
     call = _seed_call(db_session, seeded_astrologer)
 
     response = client.post(
-        "/api/voice/custom-llm",
-        headers={"x-vapi-secret": "wrong"},
-        json={"messages": [{"role": "user", "content": "hi"}], "call": {"id": call.vapi_call_id}},
+        f"/api/voice/twiml?call_id={call.id}&secret={_SECRET}",
+        headers={"X-Twilio-Signature": "not-a-real-signature"},
     )
 
     assert response.status_code == 403
 
 
-def test_custom_llm_runs_the_same_orchestrator_as_chat(
+def test_twiml_returns_conversation_relay_xml_for_a_validly_signed_request(
     client, db_session, seeded_astrologer, monkeypatch
 ):
-    monkeypatch.setattr(settings, "VAPI_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", _AUTH_TOKEN)
+    monkeypatch.setattr(settings, "VOICE_PUBLIC_BASE_URL", "https://example.ngrok-free.app")
+    call = _seed_call(db_session, seeded_astrologer)
+
+    url_path = f"/api/voice/twiml?call_id={call.id}&secret={_SECRET}"
+    full_url = f"https://example.ngrok-free.app{url_path}"
+    signature = _sign(full_url, {})
+
+    response = client.post(url_path, headers={"X-Twilio-Signature": signature})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    assert "<ConversationRelay" in response.text
+    assert f'value="{call.id}"' in response.text
+    assert "wss://example.ngrok-free.app" in response.text
+
+
+def test_status_callback_marks_call_ended(client, db_session, seeded_astrologer, monkeypatch):
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", _AUTH_TOKEN)
+    monkeypatch.setattr(settings, "VOICE_PUBLIC_BASE_URL", "https://example.ngrok-free.app")
+    call = _seed_call(db_session, seeded_astrologer)
+
+    url_path = f"/api/voice/status-callback?call_id={call.id}&secret={_SECRET}"
+    full_url = f"https://example.ngrok-free.app{url_path}"
+    form = {"CallStatus": "completed", "CallSid": call.twilio_call_sid}
+    signature = _sign(full_url, form)
+
+    response = client.post(url_path, data=form, headers={"X-Twilio-Signature": signature})
+
+    assert response.status_code == 200
+    db_session.refresh(call)
+    assert call.status == CallStatus.ENDED
+    assert call.ended_at is not None
+
+
+def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
+    client, db_session, seeded_astrologer, monkeypatch
+):
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
     call = _seed_call(db_session, seeded_astrologer)
 
     fake_client = FakeAgentClient([text_response("Your payout is scheduled for the 5th.")])
     monkeypatch.setattr("app.services.call_service.get_voice_agent_client", lambda: fake_client)
 
-    response = client.post(
-        "/api/voice/custom-llm",
-        headers={"x-vapi-secret": _SECRET},
-        json={
-            "messages": [
-                {"role": "system", "content": "You are on a phone call."},
-                {"role": "user", "content": "What is my payout status?"},
-            ],
-            "call": {"id": call.vapi_call_id},
-        },
-    )
+    with client.websocket_connect(f"/api/voice/conversation-relay?call_id={call.id}&secret={_SECRET}") as ws:
+        ws.send_json(
+            {
+                "type": "setup",
+                "callSid": call.twilio_call_sid,
+                "customParameters": {"call_id": str(call.id)},
+            }
+        )
+        ws.send_json({"type": "prompt", "voicePrompt": "What is my payout status?", "last": True})
+        reply = ws.receive_json()
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["choices"][0]["message"]["content"] == "Your payout is scheduled for the 5th."
+    assert reply == {"type": "text", "token": "Your payout is scheduled for the 5th.", "last": True}
 
     db_session.refresh(call)
     assert "What is my payout status?" in call.transcript
     assert "Your payout is scheduled for the 5th." in call.transcript
 
 
-def test_custom_llm_unknown_call_id_gets_a_spoken_fallback_not_a_500(
-    client, db_session, monkeypatch
-):
-    monkeypatch.setattr(settings, "VAPI_WEBHOOK_SECRET", _SECRET)
-
-    response = client.post(
-        "/api/voice/custom-llm",
-        headers={"x-vapi-secret": _SECRET},
-        json={"messages": [{"role": "user", "content": "hi"}], "call": {}},
-    )
-
-    assert response.status_code == 200
-    assert "trouble" in response.json()["choices"][0]["message"]["content"].lower()
-
-
-def test_events_webhook_marks_call_ended_on_end_of_call_report(
-    client, db_session, seeded_astrologer, monkeypatch
-):
-    monkeypatch.setattr(settings, "VAPI_WEBHOOK_SECRET", _SECRET)
+def test_conversation_relay_websocket_rejects_wrong_secret(client, db_session, seeded_astrologer, monkeypatch):
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
     call = _seed_call(db_session, seeded_astrologer)
 
-    response = client.post(
-        "/api/voice/events",
-        headers={"x-vapi-secret": _SECRET},
-        json={
-            "message": {
-                "type": "end-of-call-report",
-                "endedReason": "customer-ended-call",
-                "call": {"id": call.vapi_call_id},
-                "artifact": {"transcript": "Astrologer: hi\nAgent: bye"},
-            }
-        },
-    )
+    from starlette.websockets import WebSocketDisconnect
 
-    assert response.status_code == 200
-    db_session.refresh(call)
-    assert call.status == CallStatus.ENDED
-    assert call.ended_reason == "customer-ended-call"
-    assert call.ended_at is not None
-    assert call.transcript == "Astrologer: hi\nAgent: bye"
+    try:
+        with client.websocket_connect(f"/api/voice/conversation-relay?call_id={call.id}&secret=wrong"):
+            raised = False
+    except WebSocketDisconnect:
+        raised = True
 
-
-def test_events_webhook_rejects_missing_secret(client, db_session, seeded_astrologer, monkeypatch):
-    monkeypatch.setattr(settings, "VAPI_WEBHOOK_SECRET", _SECRET)
-    call = _seed_call(db_session, seeded_astrologer)
-
-    response = client.post(
-        "/api/voice/events",
-        json={"message": {"type": "end-of-call-report", "call": {"id": call.vapi_call_id}}},
-    )
-
-    assert response.status_code == 403
+    assert raised

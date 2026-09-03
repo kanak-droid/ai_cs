@@ -57,9 +57,10 @@ class AdminAccessLevel(str, enum.Enum):
 
 class CallStatus(str, enum.Enum):
     """Lifecycle of an AI support call — see app/models/call.py and
-    call_service.py. QUEUED is set the moment we ask Vapi to dial; everything
-    after that is driven by Vapi's status-update/end-of-call-report webhooks,
-    never by the request-call route itself."""
+    call_service.py. QUEUED is set the moment we ask Twilio to dial;
+    everything after that is driven by Twilio's status-callback webhook
+    (see handle_status_callback) and the ConversationRelay WebSocket
+    itself (IN_PROGRESS, on setup), never by the request-call route again."""
 
     QUEUED = "queued"
     RINGING = "ringing"
