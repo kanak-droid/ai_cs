@@ -40,4 +40,11 @@ EXPOSE 8000
 # Migrations run on every boot, before serving. Alembic migrations are
 # idempotent once applied (upgrade head is a no-op if already there), so
 # this is safe even if >1 replica starts concurrently against the same DB.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+#
+# ${PORT:-8000}, not a hardcoded port — platforms like Railway assign a
+# port dynamically via the PORT env var and route traffic to whatever that
+# is; hardcoding 8000 here means the app listens on the wrong port the
+# moment PORT is anything else, and the platform reports it unhealthy even
+# though the process actually started fine. Falls back to 8000 for local
+# `docker run` / docker-compose, where nothing sets PORT.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
