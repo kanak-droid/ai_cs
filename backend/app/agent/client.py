@@ -1,8 +1,7 @@
-"""Thin wrapper around the Gemini SDK so the orchestrator depends on one
-narrow interface (`generate`) that tests can swap for a fake — never on the
-SDK client directly.
-"""
+"""Narrow agent-provider interfaces used by the orchestrator."""
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Protocol
 
 from google.genai import types
@@ -14,7 +13,33 @@ from app.core.config import settings
 class AgentClient(Protocol):
     def generate(
         self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
-    ) -> types.GenerateContentResponse:
+    ) -> types.GenerateContentResponse: ...
+
+
+@dataclass(frozen=True)
+class StreamToolCallDelta:
+    """One partial OpenAI-compatible tool-call emitted in an SSE chunk."""
+
+    index: int
+    name: str | None = None
+    arguments: str | None = None
+
+
+@dataclass(frozen=True)
+class StreamDelta:
+    """One text or tool-call fragment from a streaming model response."""
+
+    text: str = ""
+    tool_calls: tuple[StreamToolCallDelta, ...] = ()
+
+
+class StreamingAgentClient(AgentClient, Protocol):
+    """An agent client that can expose OpenAI-compatible SSE deltas."""
+
+    def stream_generate(
+        self, *, system: str, contents: list[types.Content], tools: list[types.Tool]
+    ) -> Iterator[StreamDelta]:
+        """Streams one model completion as text/tool fragments."""
         ...
 
 

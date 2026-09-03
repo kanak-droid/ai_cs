@@ -138,8 +138,8 @@ class Settings(BaseSettings):
     ZOHO_WEBHOOK_SECRET: str = ""
 
     # AI phone support, directly on Twilio Voice + ConversationRelay
-    # (voice_client.py) — no third-party voice-AI platform (Vapi) in the
-    # loop; Twilio itself owns telephony/STT/TTS/interruption-handling via
+    # (voice_client.py) — Twilio itself owns telephony/STT/TTS/
+    # interruption-handling via
     # ConversationRelay, and streams transcribed caller speech to us over a
     # WebSocket (/api/voice/conversation-relay), to which we reply with
     # plain text. Own mock switch, same reasoning as SLACK_MOCK_MODE —
@@ -152,16 +152,13 @@ class Settings(BaseSettings):
     # — must have Voice capability and a real balance behind it; a
     # trial-only number without funds can't complete real calls.
     TWILIO_PHONE_NUMBER: str = ""
-    # Extra shared secret embedded in the TwiML-fetch URL's query string and
-    # the wss:// ConversationRelay URL (both built in voice_client.py) —
-    # Twilio's own request signature (validated via the `twilio` SDK's
-    # RequestValidator, using TWILIO_AUTH_TOKEN as the signing secret)
-    # already authenticates the two plain HTTP webhooks below, but a
-    # WebSocket upgrade request isn't covered by that same signature scheme,
-    # so this is the WebSocket route's only real defense — checked in
-    # app/api/routes/voice.py before accepting the connection or trusting
-    # the TwiML-fetch/status-callback requests.
-    TWILIO_WEBHOOK_SECRET: str = ""
+    # Twilio signs both HTTP webhooks and the initial ConversationRelay
+    # WebSocket handshake with the Auth Token. Set false only for local
+    # TestClient tests; never disable this in a deployed environment.
+    VOICE_VALIDATE_TWILIO_SIGNATURE: bool = True
+    # Automatic ticket follow-up calls remain off until product approval;
+    # administrators can still start a deliberate ticket call manually.
+    VOICE_AUTO_CALL_ON_TICKET_CREATE: bool = False
     # Where Twilio fetches TwiML, posts call-status events, and opens the
     # ConversationRelay WebSocket — must be a publicly reachable https/wss
     # URL (Twilio is a third-party service, not on our network), so this is

@@ -465,6 +465,14 @@ def create_ticket(
 
     db.commit()
     db.refresh(ticket)
+    if settings.VOICE_AUTO_CALL_ON_TICKET_CREATE:
+        # The ticket is already durable. A Twilio/provider error occurs on its
+        # own Call record and cannot roll back the astrologer's support ticket.
+        # Imported lazily to avoid the agent tool registry -> ticket service
+        # -> call service -> orchestrator import cycle at application startup.
+        from app.services import call_service
+
+        call_service.request_ticket_followup_call(db, ticket=ticket, triggered_by="ticket_created")
     return ticket
 
 
