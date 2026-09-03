@@ -18,24 +18,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice"])
 
 
-def _check_shared_secret(secret: str | None) -> None:
-    # Same "unconfigured secret blocks the webhook entirely" convention as
-    # zoho_webhook.py — this route stays inert (403ing every request) until
-    # TWILIO_WEBHOOK_SECRET is actually set, rather than silently trusting
-    # an unauthenticated caller by default.
-    if not settings.TWILIO_WEBHOOK_SECRET or secret != settings.TWILIO_WEBHOOK_SECRET:
-        raise ForbiddenError("Invalid or missing webhook secret")
-
-
 async def _check_twilio_signature(request: Request) -> dict:
     """Twilio signs every webhook request (TwiML fetch, status callback)
     with an X-Twilio-Signature header — HMAC-SHA1 over the exact request
     URL plus its POST params, keyed by TWILIO_AUTH_TOKEN (see
     https://www.twilio.com/docs/usage/webhooks/webhooks-security). This is
-    real, strong authentication — unlike the shared-secret query param
-    (_check_shared_secret), which is only a defense-in-depth backstop here
-    and the WebSocket route's *sole* check below, since a WS upgrade isn't
-    covered by this same signing scheme.
+    real, strong authentication. The opaque per-call token in the URL
+    identifies a call, while this signature proves the request came from
+    Twilio. ConversationRelay applies the same signature header to its
+    WebSocket upgrade, which is checked separately below.
 
     Reconstructs the URL from VOICE_PUBLIC_BASE_URL rather than trusting
     request.url directly — behind a tunnel (ngrok) or reverse proxy,
@@ -46,6 +37,8 @@ async def _check_twilio_signature(request: Request) -> dict:
     against it matches exactly what Twilio signed.
     """
     form = await request.form()
+    if not settings.VOICE_VALIDATE_TWILIO_SIGNATURE:
+        return dict(form)
     signature = request.headers.get("X-Twilio-Signature", "")
     public_url = f"{settings.VOICE_PUBLIC_BASE_URL}{request.url.path}"
     if request.url.query:
@@ -55,6 +48,20 @@ async def _check_twilio_signature(request: Request) -> dict:
     if not validator.validate(public_url, dict(form), signature):
         raise ForbiddenError("Invalid Twilio request signature")
     return dict(form)
+
+
+def _check_twilio_websocket_signature(websocket: WebSocket) -> bool:
+    """Validates the signed ConversationRelay WebSocket upgrade request."""
+    if not settings.VOICE_VALIDATE_TWILIO_SIGNATURE:
+        return True
+    token = websocket.query_params.get("call_token")
+    signature = websocket.headers.get("X-Twilio-Signature", "")
+    if not token or not signature:
+        return False
+    scheme = "wss" if settings.VOICE_PUBLIC_BASE_URL.startswith("https") else "ws"
+    host = settings.VOICE_PUBLIC_BASE_URL.split("://", 1)[-1]
+    public_url = f"{scheme}://{host}/api/voice/conversation-relay?call_token={token}"
+    return RequestValidator(settings.TWILIO_AUTH_TOKEN).validate(public_url, {}, signature)
 
 
 @router.post("/api/voice/request-call", response_model=RequestCallResponse)
@@ -70,38 +77,36 @@ def request_call(
 @router.post("/api/voice/twiml")
 async def twiml(
     request: Request,
-    call_id: int,
-    secret: str | None = None,
+    call_token: str,
     db: Session = Depends(get_db),
 ) -> Response:
     """Twilio fetches this the moment the outbound call connects (see
     voice_client.create_call's `url` param) and expects TwiML back —
     handing the call straight to ConversationRelay.
     """
-    _check_shared_secret(secret)
-    await _check_twilio_signature(request)
-    call = call_service.get_call(db, call_id)
+    form = await _check_twilio_signature(request)
+    call = call_service.get_call_by_relay_token(db, call_token)
+    call_service.verify_twilio_call_sid(call, form.get("CallSid"))
     return Response(content=call_service.generate_connect_twiml(call), media_type="application/xml")
 
 
 @router.post("/api/voice/status-callback")
 async def status_callback(
     request: Request,
-    call_id: int,
-    secret: str | None = None,
+    call_token: str,
     db: Session = Depends(get_db),
 ) -> dict:
-    _check_shared_secret(secret)
     form = await _check_twilio_signature(request)
-    call_service.handle_status_callback(db, call_id, form.get("CallStatus", ""))
+    call = call_service.get_call_by_relay_token(db, call_token)
+    call_service.verify_twilio_call_sid(call, form.get("CallSid"))
+    call_service.handle_status_callback(db, call.id, form.get("CallStatus", ""))
     return {"status": "ok"}
 
 
 @router.websocket("/api/voice/conversation-relay")
 async def conversation_relay(
     websocket: WebSocket,
-    call_id: int,
-    secret: str | None = None,
+    call_token: str,
     db: Session = Depends(get_db),
 ) -> None:
     """ConversationRelay's WebSocket — held open for the whole call. Twilio
@@ -131,16 +136,26 @@ async def conversation_relay(
     a fast interrupt is still noticed immediately even while a slow turn
     is still running in the background.
     """
-    if not settings.TWILIO_WEBHOOK_SECRET or secret != settings.TWILIO_WEBHOOK_SECRET:
+    if not _check_twilio_websocket_signature(websocket):
         await websocket.close(code=1008)
         return
 
     await websocket.accept()
 
     try:
-        call, ctx, history = call_service.start_conversation(db, call_id)
+        call = call_service.get_call_by_relay_token(db, call_token)
+        setup_message = await websocket.receive_json()
+        if setup_message.get("type") != "setup":
+            await websocket.close(code=1008)
+            return
+        call_service.verify_twilio_call_sid(call, setup_message.get("callSid"))
+        setup_token = (setup_message.get("customParameters") or {}).get("call_token")
+        if setup_token and setup_token != call_token:
+            await websocket.close(code=1008)
+            return
+        call, ctx, history = call_service.start_conversation(db, call.id)
     except Exception:
-        logger.exception("Failed to start conversation for call %s", call_id)
+        logger.exception("Failed to start conversation for call token %s", call_token)
         await websocket.close(code=1011)
         return
 
@@ -157,7 +172,7 @@ async def conversation_relay(
                     call_service.run_conversation_turn, db, call, ctx, history, user_message
                 )
             except Exception:
-                logger.exception("Turn failed for call %s", call_id)
+                logger.exception("Turn failed for call %s", call.id)
                 reply = "Sorry, I'm having trouble right now — could you say that again?"
         if my_turn_id != turn_id:
             return  # caller interrupted or spoke again while this was generating — never speak a stale reply
@@ -186,7 +201,9 @@ async def conversation_relay(
                 continue
 
             if msg_type == "error":
-                logger.warning("ConversationRelay error for call %s: %s", call_id, message.get("description"))
+                logger.warning(
+                    "ConversationRelay error for call %s: %s", call.id, message.get("description")
+                )
 
             # "dtmf": nothing for us to do — dtmfDetection isn't enabled in
             # generate_connect_twiml.

@@ -1,6 +1,9 @@
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+from app.models.enums import CallStatus
 
 
 class RequestCallBody(BaseModel):
@@ -16,12 +19,38 @@ class RequestCallResponse(BaseModel):
     status: str
 
 
+class CallRead(BaseModel):
+    """A persisted phone-call lifecycle safe for its owner or support staff."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    astrologer_id: int
+    ticket_id: int | None = None
+    phone_number: str
+    triggered_by: str
+    status: CallStatus
+    ended_reason: str | None = None
+    transcript: str | None = None
+    created_ticket_id: int | None = None
+    created_at: datetime
+    ended_at: datetime | None = None
+
+
+class TicketFollowupCallRequest(BaseModel):
+    """An administrator's reason and optional E.164 demo-number override."""
+
+    reason: str | None = None
+    recipient_phone: str | None = None
+
+
 class ConversationRelaySetupMessage(BaseModel):
     """First message Twilio sends when the ConversationRelay WebSocket
     connects — see https://www.twilio.com/docs/voice/conversationrelay/websocket-messages.
     customParameters carries whatever <Parameter> elements voice_client's
-    TwiML included, which is how call_id reaches us here too (redundant
-    with the call_id query param on the wss:// URL itself, on purpose —
+    TwiML included, which is how the opaque call token reaches us too
+    (redundant with the call_token query param on the wss:// URL itself,
+    on purpose —
     two independent ways to resolve the same Call row).
     """
 

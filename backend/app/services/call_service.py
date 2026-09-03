@@ -11,13 +11,11 @@ text-chat agent are free to run on different model providers since only
 the tool-calling loop (orchestrator.py) and tool_registry.py are actually
 shared between them.
 
-Unlike the earlier Vapi-based design, there is no single stateless
-request/response turn function here — ConversationRelay holds one
-WebSocket connection open for the whole call and only sends each new
-utterance (not the full history) each time, so app/api/routes/voice.py's
-WebSocket handler owns the conversation's SessionContext/history for the
-connection's lifetime and calls run_conversation_turn once per caller
-utterance.
+ConversationRelay holds one WebSocket connection open for the whole call
+and only sends each new utterance (not the full history) each time, so
+app/api/routes/voice.py's WebSocket handler owns the conversation's
+SessionContext/history for the connection's lifetime and calls
+run_conversation_turn once per caller utterance.
 
 Latency, reported live 2026-09-04: run_conversation_turn is NOT
 streamed — it waits for the whole reply (including any tool-call round
@@ -32,8 +30,10 @@ attempted here yet.
 
 import logging
 import re
+import secrets
 from xml.sax.saxutils import escape
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.client import AgentClient
@@ -41,13 +41,14 @@ from app.agent.context import SessionContext
 from app.agent.openrouter_client import get_voice_agent_client
 from app.agent.orchestrator import HistoryTurn, run_chat_turn
 from app.core.config import settings
-from app.core.errors import NotFoundError
+from app.core.errors import ForbiddenError, NotFoundError
 from app.core.security import AstrologerContext
 from app.core.time import utcnow
 from app.integrations import voice_client
 from app.models.astrologer import Astrologer
 from app.models.call import Call
 from app.models.enums import CallStatus
+from app.models.ticket import Ticket
 from app.services import chat_session_service
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,11 @@ logger = logging.getLogger(__name__)
 # words under a Hindi voice/language setting would come out garbled;
 # {name} is filled in by generate_connect_twiml.
 _VOICE_BY_LANGUAGE: dict[str, tuple[str, str | None, str]] = {
-    "Hindi": ("hi-IN", "IvLWq57RKibBrqZGpQrC", "Namaste {name}, main AstroHelp support se bol raha hoon. Main aapki kaise madad kar sakta hoon?"),
+    "Hindi": (
+        "hi-IN",
+        "IvLWq57RKibBrqZGpQrC",
+        "Namaste {name}, main AstroHelp support se bol raha hoon. Main aapki kaise madad kar sakta hoon?",
+    ),
     "English": ("en-US", None, "Hi {name}, this is AstroHelp support. How can I help you today?"),
 }
 _DEFAULT_VOICE = _VOICE_BY_LANGUAGE["English"]
@@ -98,6 +103,7 @@ def _strip_markdown(text: str) -> str:
     """
     return _MARKDOWN_PATTERN.sub("", text)
 
+
 # Twilio's own CallStatus values (status-callback's `CallStatus` form field)
 # mapped onto our CallStatus enum — see
 # https://www.twilio.com/docs/voice/twiml#callstatus-values.
@@ -116,25 +122,72 @@ _STATUS_FROM_TWILIO = {
 _TERMINAL_TWILIO_STATUSES = {"completed", "busy", "failed", "no-answer", "canceled"}
 
 
-def request_call(db: Session, astrologer: AstrologerContext, *, session_id: str | None = None) -> Call:
-    astrologer_row = db.get(Astrologer, astrologer.astrologer_id)
-    if astrologer_row is None:
-        raise NotFoundError(f"No astrologer {astrologer.astrologer_id}")
-
+def _create_call(
+    db: Session,
+    *,
+    astrologer_row: Astrologer,
+    session_id: str | None = None,
+    ticket_id: int | None = None,
+    triggered_by: str,
+    recipient_phone: str | None = None,
+) -> Call:
+    """Persists one outbound call and submits it to Twilio after a DB flush."""
+    selected_phone = recipient_phone or astrologer_row.phone
     call = Call(
-        astrologer_id=astrologer.astrologer_id,
-        phone_number=astrologer_row.phone,
+        astrologer_id=astrologer_row.id,
+        phone_number=selected_phone,
+        ticket_id=ticket_id,
+        triggered_by=triggered_by,
         session_id=session_id,
+        relay_token=secrets.token_urlsafe(32),
         status=CallStatus.QUEUED,
     )
     db.add(call)
-    db.flush()  # assigns call.id — voice_client bakes it into the TwiML/WebSocket URLs
-
-    result = voice_client.create_call(astrologer_row.phone, call.id)
+    db.flush()
+    # Keep the freshly-created token in a local non-optional variable. Old
+    # rows predate relay_token, but every new outbound call must have one.
+    if call.relay_token is None:
+        raise RuntimeError("New voice call did not receive a relay token")
+    result = voice_client.create_call(selected_phone, call.relay_token)
     call.twilio_call_sid = result.twilio_call_sid
     db.commit()
     db.refresh(call)
     return call
+
+
+def request_call(
+    db: Session, astrologer: AstrologerContext, *, session_id: str | None = None
+) -> Call:
+    astrologer_row = db.get(Astrologer, astrologer.astrologer_id)
+    if astrologer_row is None:
+        raise NotFoundError(f"No astrologer {astrologer.astrologer_id}")
+
+    return _create_call(
+        db,
+        astrologer_row=astrologer_row,
+        session_id=session_id,
+        triggered_by="user_request",
+    )
+
+
+def request_ticket_followup_call(
+    db: Session,
+    *,
+    ticket: Ticket,
+    triggered_by: str,
+    recipient_phone: str | None = None,
+) -> Call:
+    """Starts a ticket-specific outbound follow-up call using the ticket owner."""
+    astrologer_row = db.get(Astrologer, ticket.astrologer_id)
+    if astrologer_row is None:
+        raise NotFoundError(f"No astrologer found for ticket {ticket.id}")
+    return _create_call(
+        db,
+        astrologer_row=astrologer_row,
+        ticket_id=ticket.id,
+        triggered_by=triggered_by,
+        recipient_phone=recipient_phone,
+    )
 
 
 def get_call(db: Session, call_id: int) -> Call:
@@ -144,9 +197,31 @@ def get_call(db: Session, call_id: int) -> Call:
     return call
 
 
+def get_call_by_relay_token(db: Session, relay_token: str) -> Call:
+    """Returns a call by its opaque token carried in Twilio callback URLs."""
+    call = db.scalar(select(Call).where(Call.relay_token == relay_token))
+    if call is None:
+        raise NotFoundError("Unknown voice call")
+    return call
+
+
+def list_calls_for_ticket(db: Session, *, ticket_id: int) -> list[Call]:
+    """Returns ticket follow-up calls newest first for dashboard/API use."""
+    return list(
+        db.scalars(select(Call).where(Call.ticket_id == ticket_id).order_by(Call.created_at.desc()))
+    )
+
+
+def verify_twilio_call_sid(call: Call, call_sid: str | None) -> None:
+    """Rejects a webhook/relay event whose Call SID is not this call's SID."""
+    if not call_sid or call_sid != call.twilio_call_sid:
+        raise ForbiddenError("Twilio call identity does not match")
+
+
 def generate_connect_twiml(call: Call) -> str:
     """The XML Twilio fetches to learn what to do with the call — hands it
-    straight to ConversationRelay, pointed at our WebSocket. call_id is
+    straight to ConversationRelay, pointed at our WebSocket. The opaque
+    relay token is
     passed both ways on purpose: once on the wss:// URL's own query string
     (so the WebSocket route can resolve the Call before even reading the
     first message) and again as a <Parameter>, which Twilio echoes back
@@ -156,9 +231,11 @@ def generate_connect_twiml(call: Call) -> str:
     """
     ws_scheme = "wss" if settings.VOICE_PUBLIC_BASE_URL.startswith("https") else "ws"
     host = settings.VOICE_PUBLIC_BASE_URL.split("://", 1)[-1]
-    ws_url = f"{ws_scheme}://{host}/api/voice/conversation-relay?call_id={call.id}&secret={settings.TWILIO_WEBHOOK_SECRET}"
+    ws_url = f"{ws_scheme}://{host}/api/voice/conversation-relay?call_token={call.relay_token}"
 
-    language, voice, greeting_template = _VOICE_BY_LANGUAGE.get(call.astrologer.language, _DEFAULT_VOICE)
+    language, voice, greeting_template = _VOICE_BY_LANGUAGE.get(
+        call.astrologer.language, _DEFAULT_VOICE
+    )
     voice_attr = f' voice="{escape(voice)}"' if voice else ""
     greeting = greeting_template.format(name=call.astrologer.name)
 
@@ -182,7 +259,7 @@ def generate_connect_twiml(call: Call) -> str:
         'interruptible="any" interruptSensitivity="high" '
         f'language="{escape(language)}"{voice_attr} '
         f'welcomeGreeting="{escape(greeting)}">'
-        f'<Parameter name="call_id" value="{call.id}"/>'
+        f'<Parameter name="call_token" value="{escape(call.relay_token or "")}"/>'
         "</ConversationRelay>"
         "</Connect></Response>"
     )
@@ -211,7 +288,9 @@ def start_conversation(db: Session, call_id: int) -> tuple[Call, SessionContext,
     history: list[HistoryTurn] = []
     prior_chat = chat_session_service.get_transcript_text(db, call.session_id)
     if prior_chat:
-        history.append(HistoryTurn(role="astrologer", text=f"[Earlier chat with support bot]\n{prior_chat}"))
+        history.append(
+            HistoryTurn(role="astrologer", text=f"[Earlier chat with support bot]\n{prior_chat}")
+        )
 
     if call.status == CallStatus.QUEUED:
         call.status = CallStatus.IN_PROGRESS
@@ -236,12 +315,19 @@ def run_conversation_turn(
     per-request history param but accumulated locally instead of resent by
     the client every time.
     """
+    ticket_context = ""
+    if call.ticket is not None:
+        ticket_context = (
+            f" This is a proactive follow-up about support ticket #{call.ticket.id}. "
+            f"Its category is '{call.ticket.category}' and the reported issue is "
+            f"'{call.ticket.description}'. Acknowledge that context without claiming it is resolved."
+        )
     result = run_chat_turn(
         client or get_voice_agent_client(),
         ctx,
         user_message,
         history=history,
-        extra_instructions=_VOICE_INSTRUCTIONS,
+        extra_instructions=f"{_VOICE_INSTRUCTIONS}{ticket_context}",
     )
     reply = _strip_markdown(result.reply)
     history.append(HistoryTurn(role="astrologer", text=user_message))

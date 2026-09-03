@@ -19,7 +19,8 @@ from app.schemas.ticket import (
     TicketReassignRequest,
     TicketStatusUpdateRequest,
 )
-from app.services import ticket_service
+from app.schemas.voice import CallRead, TicketFollowupCallRequest
+from app.services import call_service, ticket_service
 
 router = APIRouter(tags=["admin"])
 
@@ -161,3 +162,38 @@ def reassign_ticket(
     )
     ticket_service.attach_astrologer_priority(db, [ticket])
     return AdminTicketRead.model_validate(ticket)
+
+
+@router.get("/api/admin/tickets/{ticket_id}/follow-up-calls", response_model=list[CallRead])
+def list_ticket_followup_calls(
+    ticket_id: int,
+    admin: AdminContext = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> list[CallRead]:
+    """Returns all phone follow-up attempts connected to one support ticket."""
+    ticket_service.get_ticket(db, ticket_id)
+    return [
+        CallRead.model_validate(call)
+        for call in call_service.list_calls_for_ticket(db, ticket_id=ticket_id)
+    ]
+
+
+@router.post("/api/admin/tickets/{ticket_id}/follow-up-calls", response_model=CallRead)
+def start_ticket_followup_call(
+    ticket_id: int,
+    body: TicketFollowupCallRequest,
+    admin: AdminContext = Depends(require_admin_access),
+    db: Session = Depends(get_db),
+) -> CallRead:
+    """Starts a deliberate ticket call, optionally to an E.164 demo number."""
+    ticket = ticket_service.get_ticket(db, ticket_id)
+    trigger = f"admin:{admin.email}"
+    if body.reason and body.reason.strip():
+        trigger = f"{trigger}:{body.reason.strip()[:40]}"
+    call = call_service.request_ticket_followup_call(
+        db,
+        ticket=ticket,
+        triggered_by=trigger[:80],
+        recipient_phone=body.recipient_phone,
+    )
+    return CallRead.model_validate(call)
