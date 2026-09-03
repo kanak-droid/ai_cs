@@ -137,6 +137,65 @@ class Settings(BaseSettings):
     # bearer secret, same convention as everything else in this app.
     ZOHO_WEBHOOK_SECRET: str = ""
 
+    # AI phone support, directly on Twilio Voice + ConversationRelay
+    # (voice_client.py) — Twilio itself owns telephony/STT/TTS/
+    # interruption-handling via
+    # ConversationRelay, and streams transcribed caller speech to us over a
+    # WebSocket (/api/voice/conversation-relay), to which we reply with
+    # plain text. Own mock switch, same reasoning as SLACK_MOCK_MODE —
+    # request-call logs a Call row and returns a fake twilio_call_sid
+    # instead of actually dialing.
+    VOICE_MOCK_MODE: bool = True
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    # The Twilio number calls are placed FROM (E.164, e.g. "+17372212163")
+    # — must have Voice capability and a real balance behind it; a
+    # trial-only number without funds can't complete real calls.
+    TWILIO_PHONE_NUMBER: str = ""
+    # Twilio signs both HTTP webhooks and the initial ConversationRelay
+    # WebSocket handshake with the Auth Token. Set false only for local
+    # TestClient tests; never disable this in a deployed environment.
+    VOICE_VALIDATE_TWILIO_SIGNATURE: bool = True
+    # Automatic ticket follow-up calls remain off until product approval;
+    # administrators can still start a deliberate ticket call manually.
+    VOICE_AUTO_CALL_ON_TICKET_CREATE: bool = False
+    # Where Twilio fetches TwiML, posts call-status events, and opens the
+    # ConversationRelay WebSocket — must be a publicly reachable https/wss
+    # URL (Twilio is a third-party service, not on our network), so this is
+    # never localhost outside of a tunnel (ngrok/etc.) during local dev.
+    VOICE_PUBLIC_BASE_URL: str = "http://localhost:8000"
+
+    # The phone agent's LLM — OpenRouter (https://openrouter.ai), not
+    # Vertex/Gemini — see app/agent/openrouter_client.py. Deliberately
+    # independent of the GEMINI_* settings above: text chat and the phone
+    # agent are free to run on different model providers, since only the
+    # tool-calling loop (orchestrator.py) and every tool in
+    # tool_registry.py are actually shared between them.
+    OPENROUTER_API_KEY: str = ""
+    # Verified live against a real OpenRouter key on 2026-09-03 — several
+    # Anthropic/Google model slugs 404'd ("No endpoints found") on that
+    # account despite being valid OpenRouter model ids, most likely a
+    # provider disabled in that account's OpenRouter settings rather than a
+    # bad slug. Swap this for whichever model you actually want the phone
+    # agent running on (see https://openrouter.ai/models), but if a swap
+    # 404s, check the account's enabled providers before assuming the slug
+    # is wrong.
+    #
+    # Switched from openai/gpt-4o-mini to this (2026-09-04) after live
+    # latency complaints on a real call — measured on this account,
+    # this model via Groq averaged ~0.44s per completion (incl. a tool
+    # call) vs. ~1.32s for gpt-4o-mini, ~3x faster, and a phone turn
+    # needing a tool is two completions back to back, so it compounds.
+    # Confirmed tool-calling still works correctly via Groq before
+    # switching, not just plain chat.
+    OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct"
+    # Comma-separated provider names, forces OpenRouter's routing rather
+    # than letting it pick among whichever providers host this model slug
+    # by its own policy — see app/agent/openrouter_client.py. Empty means
+    # "let OpenRouter choose". Leave this in sync with whichever provider
+    # OPENROUTER_MODEL above was actually benchmarked/verified against.
+    OPENROUTER_PROVIDER_ORDER: str = "groq"
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174"
 

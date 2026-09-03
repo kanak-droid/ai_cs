@@ -12,13 +12,15 @@ directly to the google.genai `types` module, which is the AI provider's wire
 format, not a business-logic dependency.
 """
 
+import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from google.genai import types
 
 from app.agent import executor, tool_schemas
-from app.agent.client import AgentClient
+from app.agent.client import AgentClient, StreamingAgentClient
 from app.agent.context import SessionContext
 from app.agent.prompt import render_system_prompt
 from app.agent.trace import AgentTrace, AgentTraceStep
@@ -111,8 +113,16 @@ def run_chat_turn(
     user_message: str,
     *,
     history: list[HistoryTurn] | None = None,
+    extra_instructions: str | None = None,
 ) -> ChatTurnResult:
+    # extra_instructions: an optional suffix appended to the system prompt,
+    # for a caller-specific need that doesn't belong in the shared prompt
+    # itself — e.g. call_service.py uses it to tell the model it's on a
+    # live phone call and must speak in plain sentences, never markdown
+    # (chat has no such constraint, so this stays opt-in and unused there).
     system = render_system_prompt(name=ctx.name, language=ctx.language)
+    if extra_instructions:
+        system = f"{system}\n\n{extra_instructions}"
     tools = _build_tools()
     contents: list[types.Content] = [
         types.Content(
@@ -175,3 +185,97 @@ def run_chat_turn(
         trace=trace.to_list(),
         metadata=metadata,
     )
+
+
+def run_streaming_chat_turn(
+    client: StreamingAgentClient,
+    ctx: SessionContext,
+    user_message: str,
+    *,
+    history: list[HistoryTurn] | None = None,
+    extra_instructions: str | None = None,
+    on_text: Callable[[str], None],
+) -> ChatTurnResult:
+    """Runs the tool loop while streaming a final spoken answer to ``on_text``.
+
+    OpenAI-compatible providers emit either tool-call deltas or answer-text
+    deltas for a completion. Tool-only completions stay server-side until
+    their handlers finish; final answer deltas are handed to the callback as
+    soon as they arrive, allowing the voice layer to start TTS immediately.
+    """
+    system = render_system_prompt(name=ctx.name, language=ctx.language)
+    if extra_instructions:
+        system = f"{system}\n\n{extra_instructions}"
+    tools = _build_tools()
+    contents: list[types.Content] = [
+        types.Content(
+            role="user" if turn.role == "astrologer" else "model",
+            parts=[types.Part(text=turn.text)],
+        )
+        for turn in (history or [])
+    ]
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
+    trace = AgentTrace()
+    metadata: dict = {}
+
+    for _ in range(MAX_ITERATIONS):
+        response_text: list[str] = []
+        tool_buffers: dict[int, dict[str, str]] = {}
+        for delta in client.stream_generate(system=system, contents=contents, tools=tools):
+            if delta.text:
+                response_text.append(delta.text)
+                on_text(delta.text)
+            for tool_delta in delta.tool_calls:
+                buffer = tool_buffers.setdefault(tool_delta.index, {"name": "", "arguments": ""})
+                if tool_delta.name:
+                    buffer["name"] = tool_delta.name
+                if tool_delta.arguments:
+                    buffer["arguments"] += tool_delta.arguments
+
+        if not tool_buffers:
+            reply = "".join(response_text)
+            if reply:
+                return ChatTurnResult(reply=reply, trace=trace.to_list(), metadata=metadata)
+            logger.warning("Streaming agent response had neither text nor a tool call")
+            on_text(_APOLOGY_REPLY)
+            return ChatTurnResult(reply=_APOLOGY_REPLY, trace=trace.to_list(), metadata=metadata)
+
+        if response_text:
+            # Providers normally never mix tool calls and prose in one turn.
+            # The prose has already been emitted, so retain it in history and
+            # continue the tool loop rather than losing the model output.
+            logger.warning("Streaming response mixed text and tool-call deltas")
+
+        function_call_parts = []
+        response_parts = []
+        for index in sorted(tool_buffers):
+            buffered_call = tool_buffers[index]
+            try:
+                args = json.loads(buffered_call["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            name = buffered_call["name"]
+            if not name:
+                logger.warning("Streaming response emitted a tool call without a name")
+                continue
+            call = types.FunctionCall(name=name, args=args)
+            function_call_parts.append(types.Part(function_call=call))
+            result = executor.execute(call.name, dict(call.args or {}), ctx)
+            trace.add(tool=call.name, ok=not result.is_error, summary=result.summary_for_trace)
+            metadata.update(result.metadata)
+            response_parts.append(
+                types.Part.from_function_response(
+                    name=call.name, response={"result": result.content_for_model}
+                )
+            )
+
+        if not response_parts:
+            on_text(_APOLOGY_REPLY)
+            return ChatTurnResult(reply=_APOLOGY_REPLY, trace=trace.to_list(), metadata=metadata)
+        contents.append(types.Content(role="model", parts=function_call_parts))
+        contents.append(types.Content(role="user", parts=response_parts))
+
+    final_reply = "I've had to pause here — could you try rephrasing your question?"
+    on_text(final_reply)
+    trace.truncated = True
+    return ChatTurnResult(reply=final_reply, trace=trace.to_list(), metadata=metadata)
