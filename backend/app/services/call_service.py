@@ -21,6 +21,7 @@ utterance.
 """
 
 import logging
+import re
 from xml.sax.saxutils import escape
 
 from sqlalchemy.orm import Session
@@ -28,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.agent.client import AgentClient
 from app.agent.context import SessionContext
 from app.agent.openrouter_client import get_voice_agent_client
-from app.agent.orchestrator import ChatTurnResult, HistoryTurn, run_chat_turn
+from app.agent.orchestrator import HistoryTurn, run_chat_turn
 from app.core.config import settings
 from app.core.errors import NotFoundError
 from app.core.security import AstrologerContext
@@ -40,6 +41,52 @@ from app.models.enums import CallStatus
 from app.services import chat_session_service
 
 logger = logging.getLogger(__name__)
+
+# ConversationRelay language code + a confirmed-working Twilio-listed voice
+# id per Astrologer.language value (see generate_connect_twiml) — None for
+# the voice means "use ttsProvider's own default for that language",
+# ElevenLabs by default. Hindi's voice id verified against Twilio's own
+# ConversationRelay voice-configuration docs (2026-09-03), not guessed —
+# add an entry here for any other Astrologer.language value that needs a
+# non-English call; anything unmapped falls back to English below. The
+# welcome greeting is keyed the same way — the `language` attribute sets
+# STT/TTS for the *whole* call including this greeting, so playing English
+# words under a Hindi voice/language setting would come out garbled;
+# {name} is filled in by generate_connect_twiml.
+_VOICE_BY_LANGUAGE: dict[str, tuple[str, str | None, str]] = {
+    "Hindi": ("hi-IN", "IvLWq57RKibBrqZGpQrC", "Namaste {name}, main AstroHelp support se bol raha hoon. Main aapki kaise madad kar sakta hoon?"),
+    "English": ("en-US", None, "Hi {name}, this is AstroHelp support. How can I help you today?"),
+}
+_DEFAULT_VOICE = _VOICE_BY_LANGUAGE["English"]
+
+# Told to the model only on phone calls (see run_conversation_turn) — chat
+# has no equivalent constraint, since a chat UI renders markdown fine.
+# ConversationRelay speaks whatever text we send verbatim, including any
+# markdown syntax characters, so without this the TTS voice was literally
+# reading out "asterisk asterisk" around emphasized words.
+_VOICE_INSTRUCTIONS = (
+    "You are speaking on a live phone call, not typing in a chat window. "
+    "Reply in plain, natural spoken sentences only — never use markdown "
+    "formatting (no asterisks, no bullet points or numbered lists, no "
+    "headers, no bold/italic syntax). Say amounts and dates the way a "
+    "person would say them aloud, not as a formatted table. "
+    "If the astrologer keeps describing the same problem again in this "
+    "call, do not repeat the exact same suggested resolution more than "
+    "twice in total, regardless of their priority tier — after the second "
+    "time, stop repeating yourself and instead offer to raise a support "
+    "ticket (create_support_ticket) so a human can help."
+)
+
+_MARKDOWN_PATTERN = re.compile(r"[*_#`]+|^\s*[-•]\s+", flags=re.MULTILINE)
+
+
+def _strip_markdown(text: str) -> str:
+    """Defensive backstop for _VOICE_INSTRUCTIONS above — the model mostly
+    complies with a plain-text instruction but not always, so this also
+    strips the common markdown syntax characters outright before anything
+    is ever sent to ConversationRelay to be spoken.
+    """
+    return _MARKDOWN_PATTERN.sub("", text)
 
 # Twilio's own CallStatus values (status-callback's `CallStatus` form field)
 # mapped onto our CallStatus enum — see
@@ -101,11 +148,22 @@ def generate_connect_twiml(call: Call) -> str:
     host = settings.VOICE_PUBLIC_BASE_URL.split("://", 1)[-1]
     ws_url = f"{ws_scheme}://{host}/api/voice/conversation-relay?call_id={call.id}&secret={settings.TWILIO_WEBHOOK_SECRET}"
 
+    language, voice, greeting_template = _VOICE_BY_LANGUAGE.get(call.astrologer.language, _DEFAULT_VOICE)
+    voice_attr = f' voice="{escape(voice)}"' if voice else ""
+    greeting = greeting_template.format(name=call.astrologer.name)
+
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response><Connect>"
         f'<ConversationRelay url="{escape(ws_url)}" '
-        f'welcomeGreeting="{escape(f"Hi {call.astrologer.name}, this is AstroHelp support. How can I help you today?")}">'
+        # Explicit rather than relying on the (same-valued) documented
+        # defaults — this exact behavior was reported broken once already
+        # (see app/api/routes/voice.py's conversation_relay docstring for
+        # the actual fix, which was server-side); spelling it out here
+        # removes one more place a silent default change could regress it.
+        'interruptible="any" interruptSensitivity="high" '
+        f'language="{escape(language)}"{voice_attr} '
+        f'welcomeGreeting="{escape(greeting)}">'
         f'<Parameter name="call_id" value="{call.id}"/>'
         "</ConversationRelay>"
         "</Connect></Response>"
@@ -152,22 +210,30 @@ def run_conversation_turn(
     user_message: str,
     *,
     client: AgentClient | None = None,
-) -> ChatTurnResult:
-    """One caller utterance -> one agent reply. `history` is mutated in
+) -> str:
+    """One caller utterance -> one agent reply, returned as plain text
+    ready to hand straight to ConversationRelay. `history` is mutated in
     place (the WebSocket route holds the one list for the whole call) so
     each subsequent turn sees everything said so far, same as chat's
     per-request history param but accumulated locally instead of resent by
     the client every time.
     """
-    result = run_chat_turn(client or get_voice_agent_client(), ctx, user_message, history=history)
+    result = run_chat_turn(
+        client or get_voice_agent_client(),
+        ctx,
+        user_message,
+        history=history,
+        extra_instructions=_VOICE_INSTRUCTIONS,
+    )
+    reply = _strip_markdown(result.reply)
     history.append(HistoryTurn(role="astrologer", text=user_message))
-    history.append(HistoryTurn(role="assistant", text=result.reply))
+    history.append(HistoryTurn(role="assistant", text=reply))
 
-    call.transcript = (call.transcript or "") + f"\nAstrologer: {user_message}\nAgent: {result.reply}"
+    call.transcript = (call.transcript or "") + f"\nAstrologer: {user_message}\nAgent: {reply}"
     if result.metadata.get("created_ticket_id"):
         call.created_ticket_id = result.metadata["created_ticket_id"]
     db.commit()
-    return result
+    return reply
 
 
 def handle_status_callback(db: Session, call_id: int, twilio_status: str) -> None:

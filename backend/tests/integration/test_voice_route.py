@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import time
 
 from app.core.config import settings
 from app.models.call import Call
@@ -8,6 +9,19 @@ from app.models.enums import CallStatus
 from tests.unit.test_agent_tool_selection import FakeAgentClient, text_response
 
 _SECRET = "test-webhook-secret"
+
+
+class _SlowFakeAgentClient(FakeAgentClient):
+    """Deliberately slow enough that a test can reliably send an interrupt
+    (or a second prompt) before this turn's generate() call returns —
+    without the delay, the fake client resolves near-instantly and the
+    race the regression test below is trying to exercise wouldn't
+    reliably happen.
+    """
+
+    def generate(self, *, system, contents, tools):
+        time.sleep(0.3)
+        return super().generate(system=system, contents=contents, tools=tools)
 _AUTH_TOKEN = "test-twilio-auth-token"
 
 
@@ -143,6 +157,34 @@ def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
     db_session.refresh(call)
     assert "What is my payout status?" in call.transcript
     assert "Your payout is scheduled for the 5th." in call.transcript
+
+
+def test_conversation_relay_discards_reply_after_interrupt(client, db_session, seeded_astrologer, monkeypatch):
+    """Regression test: reported live 2026-09-03 as "the AI doesn't listen
+    and keeps speaking" — caused by the old WebSocket loop blocking on
+    run_conversation_turn before it could ever read the 'interrupt'
+    message, so an already-stale reply got spoken anyway. Simulates that
+    exact race: a slow first turn in flight, an interrupt, then a second
+    (real) prompt — only the second turn's reply should ever be sent.
+    """
+    monkeypatch.setattr(settings, "TWILIO_WEBHOOK_SECRET", _SECRET)
+    call = _seed_call(db_session, seeded_astrologer)
+
+    slow_client = _SlowFakeAgentClient([text_response("STALE reply to the first question")])
+    monkeypatch.setattr("app.services.call_service.get_voice_agent_client", lambda: slow_client)
+
+    with client.websocket_connect(f"/api/voice/conversation-relay?call_id={call.id}&secret={_SECRET}") as ws:
+        ws.send_json({"type": "setup", "callSid": call.twilio_call_sid, "customParameters": {}})
+        ws.send_json({"type": "prompt", "voicePrompt": "first question", "last": True})
+        ws.send_json({"type": "interrupt", "utteranceUntilInterrupt": "", "durationUntilInterruptMs": 100})
+
+        fast_client = FakeAgentClient([text_response("Real reply to the second question")])
+        monkeypatch.setattr("app.services.call_service.get_voice_agent_client", lambda: fast_client)
+        ws.send_json({"type": "prompt", "voicePrompt": "second question", "last": True})
+
+        reply = ws.receive_json()
+
+    assert reply == {"type": "text", "token": "Real reply to the second question", "last": True}
 
 
 def test_conversation_relay_websocket_rejects_wrong_secret(client, db_session, seeded_astrologer, monkeypatch):

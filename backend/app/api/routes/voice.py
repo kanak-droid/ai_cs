@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
@@ -106,10 +107,29 @@ async def conversation_relay(
     """ConversationRelay's WebSocket — held open for the whole call. Twilio
     sends one 'setup' message, then one 'prompt' per caller utterance
     (interim ones with last=False, which we ignore, then a final one with
-    last=True); we reply with a 'text' message per turn. See
-    call_service.py's module docstring for why the conversation's
-    SessionContext/history lives here (per-connection) rather than in a
-    stateless service function like chat's.
+    last=True), plus an 'interrupt' message the moment the caller talks
+    over the agent. See call_service.py's module docstring for why the
+    conversation's SessionContext/history lives here (per-connection)
+    rather than in a stateless service function like chat's.
+
+    Handling 'interrupt' is the reason this loop is structured around a
+    background task rather than one straight-line
+    receive -> process -> reply per iteration: ConversationRelay itself
+    already stops *audio playback* the instant it detects the caller
+    speaking (interruptible="any" — see generate_connect_twiml), but a
+    naive await-everything loop would still be blocked inside a slow
+    run_conversation_turn call when that interrupt message arrives,
+    wouldn't read it until the current turn finished, and would then
+    dutifully send the now-stale reply anyway — which is exactly what
+    "the AI doesn't listen and keeps talking" turned out to be. `turn_id`
+    is bumped on every interrupt and every new finalized prompt; a turn's
+    reply is only ever sent if `turn_id` still matches what it was when
+    that turn started, so a superseded turn's answer is silently dropped
+    instead of spoken. `_lock` serializes the actual DB/LLM work itself
+    (SQLAlchemy Sessions aren't safe for concurrent use across threads) —
+    it does not block the receive loop, only the turn-processing task, so
+    a fast interrupt is still noticed immediately even while a slow turn
+    is still running in the background.
     """
     if not settings.TWILIO_WEBHOOK_SECRET or secret != settings.TWILIO_WEBHOOK_SECRET:
         await websocket.close(code=1008)
@@ -124,10 +144,33 @@ async def conversation_relay(
         await websocket.close(code=1011)
         return
 
+    turn_id = 0
+    lock = asyncio.Lock()
+
+    async def process_turn(user_message: str, my_turn_id: int) -> None:
+        nonlocal turn_id
+        async with lock:
+            if my_turn_id != turn_id:
+                return  # superseded before we even started this turn's work
+            try:
+                reply = await asyncio.to_thread(
+                    call_service.run_conversation_turn, db, call, ctx, history, user_message
+                )
+            except Exception:
+                logger.exception("Turn failed for call %s", call_id)
+                reply = "Sorry, I'm having trouble right now — could you say that again?"
+        if my_turn_id != turn_id:
+            return  # caller interrupted or spoke again while this was generating — never speak a stale reply
+        await websocket.send_json({"type": "text", "token": reply, "last": True})
+
     try:
         while True:
             message = await websocket.receive_json()
             msg_type = message.get("type")
+
+            if msg_type == "interrupt":
+                turn_id += 1
+                continue
 
             if msg_type == "prompt":
                 if not message.get("last", True):
@@ -135,20 +178,18 @@ async def conversation_relay(
                 user_message = message.get("voicePrompt", "")
                 if not user_message:
                     continue
-                try:
-                    result = call_service.run_conversation_turn(db, call, ctx, history, user_message)
-                    reply = result.reply
-                except Exception:
-                    logger.exception("Turn failed for call %s", call_id)
-                    reply = "Sorry, I'm having trouble right now — could you say that again?"
-                await websocket.send_json({"type": "text", "token": reply, "last": True})
+                turn_id += 1
+                # Fire-and-forget: the loop goes straight back to
+                # receive_json() so a following interrupt/prompt can still
+                # supersede this one instead of waiting behind it.
+                asyncio.create_task(process_turn(user_message, turn_id))
+                continue
 
-            elif msg_type == "error":
+            if msg_type == "error":
                 logger.warning("ConversationRelay error for call %s: %s", call_id, message.get("description"))
 
-            # "interrupt" and "dtmf" messages: nothing for us to do —
-            # ConversationRelay already stops playback on interrupt itself,
-            # and dtmfDetection isn't enabled in generate_connect_twiml.
+            # "dtmf": nothing for us to do — dtmfDetection isn't enabled in
+            # generate_connect_twiml.
 
     except WebSocketDisconnect:
         pass
