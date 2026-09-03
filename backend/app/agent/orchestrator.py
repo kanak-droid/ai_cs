@@ -111,8 +111,16 @@ def run_chat_turn(
     user_message: str,
     *,
     history: list[HistoryTurn] | None = None,
+    extra_instructions: str | None = None,
 ) -> ChatTurnResult:
+    # extra_instructions: an optional suffix appended to the system prompt,
+    # for a caller-specific need that doesn't belong in the shared prompt
+    # itself — e.g. call_service.py uses it to tell the model it's on a
+    # live phone call and must speak in plain sentences, never markdown
+    # (chat has no such constraint, so this stays opt-in and unused there).
     system = render_system_prompt(name=ctx.name, language=ctx.language)
+    if extra_instructions:
+        system = f"{system}\n\n{extra_instructions}"
     tools = _build_tools()
     contents: list[types.Content] = [
         types.Content(

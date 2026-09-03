@@ -31,6 +31,7 @@ def _isolate_from_real_network(monkeypatch):
     monkeypatch.setattr(settings, "SLACK_MOCK_MODE", True)
     monkeypatch.setattr(settings, "ZOHO_MOCK_MODE", True)
     monkeypatch.setattr(settings, "MOENGAGE_MOCK_MODE", True)
+    monkeypatch.setattr(settings, "VOICE_MOCK_MODE", True)
 
     def _blocked(*args, **kwargs):
         raise RuntimeError("Real network calls are not allowed in tests.")
