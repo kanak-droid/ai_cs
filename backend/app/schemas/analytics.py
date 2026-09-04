@@ -47,6 +47,10 @@ class AnalyticsOverview(BaseModel):
     # CONVERSATION rating (ChatSession.rating), not tied to any ticket.
     avg_ticket_rating: float | None = None
     ticket_rating_distribution: dict[str, int]
+    total_calls: int
+    avg_call_duration_seconds: float | None = None
+    call_resolution_counts: dict[str, int]
+    calls_with_ticket: int
     kam_performance: list[KamPerformance]
     weekly_ticket_trend: list[TicketPeriodCount]
     monthly_ticket_trend: list[TicketPeriodCount]

@@ -25,7 +25,10 @@ const PRIORITY_OPTIONS: { value: PriorityFilter | ""; label: string }[] = [
 function formatSeconds(seconds: number | null): string {
   if (seconds === null) return "—";
   if (seconds < 60) return `${Math.round(seconds)}s`;
-  return `${Math.round(seconds / 60)}m`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  if (m < 60) return `${m}m ${s}s`;
+  return `${Math.round(m / 60)}h ${m % 60}m`;
 }
 
 function formatHours(hours: number | null): string {
@@ -137,6 +140,37 @@ export function AnalyticsPage() {
             }
           />
         </button>
+      </div>
+
+      <div className="mt-2">
+        <h2 className="mb-2 text-sm font-medium uppercase tracking-wide text-night/40">
+          AI Phone Calls
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Total calls" value={`${overview.total_calls}`} />
+          <StatCard
+            label="Avg. call duration"
+            value={formatSeconds(overview.avg_call_duration_seconds)}
+          />
+          <StatCard
+            label="Call resolution rate"
+            value={
+              overview.total_calls > 0
+                ? `${Math.round(((overview.call_resolution_counts["resolved"] ?? 0) / overview.total_calls) * 100)}%`
+                : "—"
+            }
+            hint={`${overview.call_resolution_counts["resolved"] ?? 0} resolved · ${overview.call_resolution_counts["escalated"] ?? 0} escalated · ${overview.call_resolution_counts["follow_up_required"] ?? 0} follow-up`}
+          />
+          <StatCard
+            label="Call → ticket rate"
+            value={
+              overview.total_calls > 0
+                ? `${Math.round((overview.calls_with_ticket / overview.total_calls) * 100)}%`
+                : "—"
+            }
+            hint={`${overview.calls_with_ticket} of ${overview.total_calls} calls created a ticket`}
+          />
+        </div>
       </div>
 
       {ratingsOpen && (

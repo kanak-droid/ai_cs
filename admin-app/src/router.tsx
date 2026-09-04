@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { RequireAuth } from "./auth/RequireAuth";
 import { AdminsPage } from "./features/admins/pages/AdminsPage";
 import { AnalyticsPage } from "./features/analytics/pages/AnalyticsPage";
+import { AstrologerOverviewPage } from "./features/astrologers/pages/AstrologerOverviewPage";
 import { LoginPage } from "./features/auth/pages/LoginPage";
 import { CallLogDetailPage } from "./features/callLogs/pages/CallLogDetailPage";
 import { CallLogsPage } from "./features/callLogs/pages/CallLogsPage";
@@ -114,6 +115,16 @@ const router = createBrowserRouter([
       <RequireAuth>
         <AppShell>
           <SheetsSyncPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/astrologer-overview",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <AstrologerOverviewPage />
         </AppShell>
       </RequireAuth>
     ),

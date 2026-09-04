@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.errors import NotFoundError
 from app.integrations import queue_performance_client
+from app.models.astrologer import Astrologer
 from app.models.call import Call
 
 
@@ -24,6 +25,7 @@ def list_call_logs(
     resolution_status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    astrologer_search: str | None = None,
 ) -> list[Call]:
     stmt = select(Call).options(joinedload(Call.astrologer))
     if resolution_status is not None:
@@ -32,6 +34,12 @@ def list_call_logs(
         stmt = stmt.where(Call.created_at >= datetime.combine(date_from, time.min))
     if date_to is not None:
         stmt = stmt.where(Call.created_at < datetime.combine(date_to + timedelta(days=1), time.min))
+    if astrologer_search is not None:
+        term = astrologer_search.strip()
+        if term.isdigit():
+            stmt = stmt.where(Call.astrologer_id == int(term))
+        elif term:
+            stmt = stmt.join(Astrologer).where(Astrologer.name.ilike(f"%{term}%"))
     stmt = stmt.order_by(Call.created_at.asc())
     calls = list(db.scalars(stmt).unique())
     calls.sort(key=lambda c: queue_performance_client.priority_sort_key(db, c.astrologer_id))

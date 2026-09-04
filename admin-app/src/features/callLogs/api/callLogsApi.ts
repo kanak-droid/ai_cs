@@ -6,6 +6,7 @@ export interface CallLogFilters {
   resolutionStatus?: string;
   dateFrom?: string;
   dateTo?: string;
+  astrologer?: string;
 }
 
 export function fetchCallLogs(filters: CallLogFilters = {}): Promise<CallLogSummary[]> {
@@ -13,6 +14,7 @@ export function fetchCallLogs(filters: CallLogFilters = {}): Promise<CallLogSumm
   if (filters.resolutionStatus) params.set("resolution_status", filters.resolutionStatus);
   if (filters.dateFrom) params.set("from", filters.dateFrom);
   if (filters.dateTo) params.set("to", filters.dateTo);
+  if (filters.astrologer) params.set("astrologer", filters.astrologer);
   const qs = params.toString();
   return api.get<CallLogSummary[]>(`/api/admin/call-logs${qs ? `?${qs}` : ""}`);
 }

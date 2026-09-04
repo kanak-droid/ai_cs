@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 
 from app.integrations import queue_performance_client
 from app.models.admin import Admin
+from app.models.call import Call
 from app.models.chat_session import ChatSession
-from app.models.enums import AdminRole, SessionResolution, TicketStatus
+from app.models.enums import AdminRole, CallStatus, SessionResolution, TicketStatus
 from app.models.ticket import Ticket
 
 _TERMINAL_STATUSES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
@@ -260,6 +261,29 @@ def get_overview(
         .scalar()
     )
 
+    call_query = db.query(Call)
+    if astrologer_ids is not None:
+        call_query = call_query.filter(Call.astrologer_id.in_(astrologer_ids))
+    if date_from is not None:
+        call_query = call_query.filter(Call.created_at >= _day_start(date_from))
+    if date_to is not None:
+        call_query = call_query.filter(Call.created_at < _day_start(date_to + timedelta(days=1)))
+
+    total_calls = call_query.count()
+    completed_call_query = call_query.filter(Call.status == CallStatus.ENDED)
+    avg_call_duration_seconds = (
+        completed_call_query.filter(Call.ended_at.isnot(None))
+        .with_entities(func.avg(func.extract("epoch", Call.ended_at - Call.created_at)))
+        .scalar()
+    )
+    call_resolution_counts = dict(
+        call_query.filter(Call.resolution_status.isnot(None))
+        .with_entities(Call.resolution_status, func.count(Call.id))
+        .group_by(Call.resolution_status)
+        .all()
+    )
+    calls_with_ticket = call_query.filter(Call.created_ticket_id.isnot(None)).count()
+
     return {
         "bot_resolved_count": bot_resolved_count,
         "escalated_count": escalated_count,
@@ -276,6 +300,12 @@ def get_overview(
         "rating_distribution": {str(rating): count for rating, count in rating_rows},
         "avg_ticket_rating": float(avg_ticket_rating) if avg_ticket_rating is not None else None,
         "ticket_rating_distribution": {str(rating): count for rating, count in ticket_rating_rows},
+        "total_calls": total_calls,
+        "avg_call_duration_seconds": (
+            float(avg_call_duration_seconds) if avg_call_duration_seconds is not None else None
+        ),
+        "call_resolution_counts": call_resolution_counts,
+        "calls_with_ticket": calls_with_ticket,
         # Deliberately NOT filtered by astrologer_ids/priority — a KAM/CS's
         # overall workload numbers wouldn't make sense scoped to only one
         # priority tier's astrologers; this table is its own view. Date
