@@ -26,7 +26,11 @@ class _SlowFakeAgentClient(FakeAgentClient):
 class _StreamingFeedbackClient:
     """Streams an intentionally over-questioning response for pacing tests."""
 
+    def __init__(self) -> None:
+        self.calls = []
+
     def stream_generate(self, *, system, contents, tools):
+        self.calls.append({"system": system, "contents": list(contents), "tools": tools})
         yield StreamDelta(text="I understand. How easy is the app to navigate? ")
         yield StreamDelta(text="What would you improve first?")
 
@@ -223,6 +227,7 @@ def test_feedback_call_asks_only_one_question_per_turn(db_session, seeded_astrol
     )
     spoken = []
 
+    client = _StreamingFeedbackClient()
     reply = call_service.stream_feedback_turn(
         db_session,
         call,
@@ -230,13 +235,14 @@ def test_feedback_call_asks_only_one_question_per_turn(db_session, seeded_astrol
         [],
         "The app is mostly good.",
         "Feedback prompt",
-        client=_StreamingFeedbackClient(),
+        client=client,
         on_token=spoken.append,
     )
 
     assert reply == "I understand. How easy is the app to navigate?"
     assert "improve first" not in reply.lower()
     assert "".join(spoken) == reply
+    assert "never quote, list, or repeat" in client.calls[0]["system"]
 
 
 def test_conversation_relay_discards_reply_after_interrupt(

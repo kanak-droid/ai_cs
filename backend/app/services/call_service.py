@@ -667,6 +667,10 @@ _FEEDBACK_VOICE_INSTRUCTIONS = (
     "Reply in plain, natural spoken sentences only — never use markdown "
     "formatting (no asterisks, no bullet points or numbered lists, no "
     "headers, no bold/italic syntax). Keep the conversation warm and casual. "
+    "Keep every reply to one or two short sentences. Acknowledge feedback "
+    "briefly (for example, 'Got it' or 'Thanks for sharing') but never quote, "
+    "list, or repeat the caller's detailed words back to them. Capture the "
+    "detail silently and move on naturally. "
     "Ask at most ONE question in this reply. You may acknowledge the caller's "
     "answer before it, but once you ask that single question, STOP speaking "
     "and wait for their answer. Never ask a list of questions or combine "
@@ -679,13 +683,14 @@ The call was specifically to collect feedback about the AstroLokal app experienc
 (NOT a support call). Extract structured insights from the transcript.
 
 Return valid JSON with exactly these fields:
-- "summary": 2-3 sentence overview of what feedback was shared
+- "summary": one or two short sentences with only the overall themes; do not quote, \
+  paraphrase in detail, or repeat the caller's exact wording
 - "app_rating": integer 1-5 (overall app satisfaction inferred from tone/words, \
   or null if impossible to judge)
 - "topics_discussed": list of short topic strings covered (e.g. ["app_navigation", \
   "payout_experience", "call_quality", "support_experience"])
-- "positive_feedback": list of specific positive things they mentioned
-- "negative_feedback": list of specific complaints or improvement suggestions
+- "positive_feedback": at most 3 short, high-level paraphrased themes
+- "negative_feedback": at most 3 short, high-level paraphrased themes
 - "key_suggestion": the single most actionable suggestion, or null if none
 
 Transcript:
