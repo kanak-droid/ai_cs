@@ -72,7 +72,7 @@ _VOICE_BY_LANGUAGE: dict[str, tuple[str, str | None, str]] = {
     ),
     "English": ("en-US", None, "Hi {name}, this is AstroHelp support. How can I help you today?"),
 }
-_DEFAULT_VOICE = _VOICE_BY_LANGUAGE["English"]
+_DEFAULT_VOICE = _VOICE_BY_LANGUAGE["Hindi"]
 
 # Told to the model only on phone calls (see run_conversation_turn) — chat
 # has no equivalent constraint, since a chat UI renders markdown fine.
