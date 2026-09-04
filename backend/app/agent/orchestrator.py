@@ -28,6 +28,7 @@ from app.agent.trace import AgentTrace, AgentTraceStep
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
+_MAX_STREAM_EMPTY_RETRIES = 2
 _APOLOGY_REPLY = "Sorry, I couldn't process that — could you try again?"
 # Confirmed live 2026-08-18 on Vertex AI: a candidate with a non-STOP
 # finish_reason (MALFORMED_FUNCTION_CALL — a tool call with arguments that
@@ -221,16 +222,32 @@ def run_streaming_chat_turn(
     for _ in range(MAX_ITERATIONS):
         response_text: list[str] = []
         tool_buffers: dict[int, dict[str, str]] = {}
-        for delta in client.stream_generate(system=system, contents=contents, tools=tools):
-            if delta.text:
-                response_text.append(delta.text)
-                on_text(delta.text)
-            for tool_delta in delta.tool_calls:
-                buffer = tool_buffers.setdefault(tool_delta.index, {"name": "", "arguments": ""})
-                if tool_delta.name:
-                    buffer["name"] = tool_delta.name
-                if tool_delta.arguments:
-                    buffer["arguments"] += tool_delta.arguments
+
+        empty_retries = 0
+        while True:
+            for delta in client.stream_generate(system=system, contents=contents, tools=tools):
+                if delta.text:
+                    response_text.append(delta.text)
+                    on_text(delta.text)
+                for tool_delta in delta.tool_calls:
+                    buffer = tool_buffers.setdefault(
+                        tool_delta.index, {"name": "", "arguments": ""}
+                    )
+                    if tool_delta.name:
+                        buffer["name"] = tool_delta.name
+                    if tool_delta.arguments:
+                        buffer["arguments"] += tool_delta.arguments
+
+            if response_text or tool_buffers:
+                break
+            empty_retries += 1
+            if empty_retries > _MAX_STREAM_EMPTY_RETRIES:
+                break
+            logger.warning(
+                "Streaming response empty, retrying (%d/%d)",
+                empty_retries,
+                _MAX_STREAM_EMPTY_RETRIES,
+            )
 
         if not tool_buffers:
             reply = "".join(response_text)

@@ -28,6 +28,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 from collections.abc import Callable
 from typing import cast
 from xml.sax.saxutils import escape
@@ -461,32 +462,103 @@ def _normalise_call_outcome(raw_summary: str, call: Call) -> dict[str, str]:
     return outcome
 
 
+def _infer_deterministic_status(actions: list[dict] | None) -> str | None:
+    """Returns a resolution_status when tool outcomes are unambiguous."""
+    if not actions:
+        return None
+    for action in actions:
+        tool = action.get("tool", "")
+        ok = action.get("ok", False)
+        if tool == "create_support_ticket" and ok:
+            return "escalated"
+        if tool == "mark_issue_resolved" and ok:
+            return "resolved"
+    return None
+
+
+def _build_summary_prompt(call: Call) -> str:
+    """Builds a detailed prompt with deterministic hints for the summary model."""
+    actions = call.actions_taken or []
+    deterministic_hint = _infer_deterministic_status(actions)
+
+    hints: list[str] = []
+    if deterministic_hint == "escalated":
+        hints.append(
+            "IMPORTANT: The agent successfully created a support ticket during this "
+            "call. This strongly indicates resolution_status should be 'escalated'."
+        )
+    elif deterministic_hint == "resolved":
+        hints.append(
+            "IMPORTANT: The agent called mark_issue_resolved during this call. "
+            "This strongly indicates resolution_status should be 'resolved'."
+        )
+
+    tool_names = [a.get("tool", "") for a in actions if a.get("ok")]
+    if tool_names:
+        hints.append(f"Tools used successfully: {', '.join(tool_names)}.")
+
+    sections = [
+        "Summarize this completed customer-support phone call for an internal "
+        "dashboard read by human CS agents who may call this person back.",
+        "Do not invent facts. resolution_status must be one of: resolved, "
+        "follow_up_required, escalated, unknown.",
+    ]
+    if hints:
+        sections.append("\n".join(hints))
+    sections.append(f"Actions taken: {json.dumps(actions)}")
+    sections.append(f"Transcript:\n{call.transcript[-_SUMMARY_TRANSCRIPT_LIMIT:]}")
+    return "\n\n".join(sections)
+
+
+def _generate_summary_in_background(call_id: int) -> None:
+    """Runs summary generation in a daemon thread with its own DB session."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        call = db.get(Call, call_id)
+        if call is None or call.summary_generated_at is not None:
+            return
+
+        fallback = _fallback_call_outcome(call)
+        outcome = fallback
+        if settings.OPENROUTER_API_KEY and call.transcript:
+            prompt = _build_summary_prompt(call)
+            try:
+                raw_summary = get_voice_agent_client().generate_call_summary(prompt=prompt)
+                outcome = _normalise_call_outcome(raw_summary, call)
+                deterministic = _infer_deterministic_status(call.actions_taken)
+                if deterministic:
+                    outcome["resolution_status"] = deterministic
+            except Exception:
+                logger.exception("Call outcome generation failed for call %s", call_id)
+
+        call.support_summary = outcome["summary"]
+        call.resolution_status = outcome["resolution_status"]
+        call.suggested_solution = outcome["suggested_solution"]
+        call.next_action = outcome["next_action"]
+        call.summary_generated_at = utcnow()
+        db.commit()
+    except Exception:
+        logger.exception("Background summary thread failed for call %s", call_id)
+    finally:
+        db.close()
+
+
 def generate_call_outcome_summary(db: Session, call: Call) -> None:
-    """Generates the customer-support dashboard outcome exactly once per call."""
+    """Generates the customer-support dashboard outcome exactly once per call.
+
+    Spawns a background thread so the Twilio status-callback webhook responds
+    immediately — summary latency no longer blocks the webhook response.
+    """
     if call.summary_generated_at is not None:
         return
-    fallback = _fallback_call_outcome(call)
-    outcome = fallback
-    if settings.OPENROUTER_API_KEY and call.transcript:
-        prompt = (
-            "Summarize this completed customer-support phone call for an internal dashboard. "
-            "Do not invent facts. resolution_status must be one of: resolved, follow_up_required, "
-            "escalated, unknown.\n\n"
-            f"Actions taken: {json.dumps(call.actions_taken or [])}\n\n"
-            f"Transcript:\n{call.transcript[-_SUMMARY_TRANSCRIPT_LIMIT:]}"
-        )
-        try:
-            raw_summary = get_voice_agent_client().generate_call_summary(prompt=prompt)
-            outcome = _normalise_call_outcome(raw_summary, call)
-        except Exception:
-            logger.exception("Call outcome generation failed for call %s", call.id)
-
-    call.support_summary = outcome["summary"]
-    call.resolution_status = outcome["resolution_status"]
-    call.suggested_solution = outcome["suggested_solution"]
-    call.next_action = outcome["next_action"]
-    call.summary_generated_at = utcnow()
-    db.commit()
+    thread = threading.Thread(
+        target=_generate_summary_in_background,
+        args=(call.id,),
+        daemon=True,
+    )
+    thread.start()
 
 
 def handle_status_callback(db: Session, call_id: int, twilio_status: str) -> None:
