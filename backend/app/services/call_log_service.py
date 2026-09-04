@@ -26,8 +26,13 @@ def list_call_logs(
     date_from: date | None = None,
     date_to: date | None = None,
     astrologer_search: str | None = None,
+    triggered_by: str | None = None,
 ) -> list[Call]:
     stmt = select(Call).options(joinedload(Call.astrologer))
+    if triggered_by is not None:
+        stmt = stmt.where(Call.triggered_by == triggered_by)
+    else:
+        stmt = stmt.where(Call.triggered_by != "feedback_call")
     if resolution_status is not None:
         stmt = stmt.where(Call.resolution_status == resolution_status)
     if date_from is not None:
