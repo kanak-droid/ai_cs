@@ -100,6 +100,7 @@ _VOICE_INSTRUCTIONS = (
 )
 
 _MARKDOWN_PATTERN = re.compile(r"[*_#`]+|^\s*[-•]\s+", flags=re.MULTILINE)
+_SENTENCE_END_PATTERN = re.compile(r"(?<=[.!?।])(?=\s|$)")
 
 
 def _strip_markdown(text: str) -> str:
@@ -109,6 +110,60 @@ def _strip_markdown(text: str) -> str:
     is ever sent to ConversationRelay to be spoken.
     """
     return _MARKDOWN_PATTERN.sub("", text)
+
+
+class _OneQuestionFeedbackReply:
+    """Streams a feedback reply while enforcing one question per phone turn.
+
+    ConversationRelay starts speaking as soon as it receives text. Buffering
+    only through a sentence boundary preserves that responsiveness, while the
+    hard stop after the first question prevents a survey-style list of
+    questions reaching the caller. A new question can only be generated after
+    Twilio sends the caller's next final transcript.
+    """
+
+    def __init__(self, on_text: Callable[[str], None]) -> None:
+        """Creates a feedback reply buffer that forwards approved speech."""
+        self._on_text = on_text
+        self._pending = ""
+        self._spoken_parts: list[str] = []
+        self._question_asked = False
+
+    @property
+    def reply(self) -> str:
+        """Returns exactly the text that was spoken to the caller."""
+        return "".join(self._spoken_parts).strip()
+
+    def add(self, text: str) -> None:
+        """Adds a streamed model fragment and speaks complete safe sentences."""
+        if not text or self._question_asked:
+            return
+        self._pending += text
+        while match := _SENTENCE_END_PATTERN.search(self._pending):
+            sentence = self._pending[: match.end()]
+            self._pending = self._pending[match.end() :]
+            self._approve_sentence(sentence)
+            if self._question_asked:
+                self._pending = ""
+                return
+
+    def finish(self) -> None:
+        """Flushes a final partial sentence, stopping at its first question."""
+        if not self._question_asked and self._pending:
+            question_index = self._pending.find("?")
+            sentence = self._pending if question_index < 0 else self._pending[: question_index + 1]
+            self._approve_sentence(sentence)
+            self._pending = ""
+
+    def _approve_sentence(self, sentence: str) -> None:
+        """Speaks one sentence and closes the turn if it contains a question."""
+        clean_sentence = _strip_markdown(sentence)
+        if not clean_sentence or self._question_asked:
+            return
+        self._spoken_parts.append(clean_sentence)
+        self._on_text(clean_sentence)
+        if "?" in clean_sentence:
+            self._question_asked = True
 
 
 # Twilio's own CallStatus values (status-callback's `CallStatus` form field)
@@ -611,7 +666,11 @@ _FEEDBACK_VOICE_INSTRUCTIONS = (
     "You are speaking on a live phone call, not typing in a chat window. "
     "Reply in plain, natural spoken sentences only — never use markdown "
     "formatting (no asterisks, no bullet points or numbered lists, no "
-    "headers, no bold/italic syntax). Keep the conversation warm and casual."
+    "headers, no bold/italic syntax). Keep the conversation warm and casual. "
+    "Ask at most ONE question in this reply. You may acknowledge the caller's "
+    "answer before it, but once you ask that single question, STOP speaking "
+    "and wait for their answer. Never ask a list of questions or combine "
+    "multiple questions with 'and'."
 )
 
 _FEEDBACK_SUMMARY_PROMPT = """\
@@ -683,6 +742,7 @@ def stream_feedback_turn(
 ) -> str:
     """Streams a feedback conversation turn — no tools, feedback system prompt."""
     agent_client = client or get_voice_agent_client()
+    reply_limiter = _OneQuestionFeedbackReply(on_text=on_token)
     if hasattr(agent_client, "stream_generate"):
         result = run_streaming_chat_turn(
             cast(StreamingAgentClient, agent_client),
@@ -692,7 +752,7 @@ def stream_feedback_turn(
             extra_instructions=_FEEDBACK_VOICE_INSTRUCTIONS,
             system_prompt_override=feedback_prompt,
             disable_tools=True,
-            on_text=lambda token: on_token(_strip_markdown(token)),
+            on_text=reply_limiter.add,
         )
     else:
         result = run_chat_turn(
@@ -704,14 +764,15 @@ def stream_feedback_turn(
             system_prompt_override=feedback_prompt,
             disable_tools=True,
         )
-        on_token(_strip_markdown(result.reply))
+        reply_limiter.add(result.reply)
+    reply_limiter.finish()
 
     return _persist_conversation_turn(
         db,
         call=call,
         history=history,
         user_message=user_message,
-        reply=result.reply,
+        reply=reply_limiter.reply,
         trace=result.trace,
         metadata=result.metadata,
     )
@@ -747,12 +808,14 @@ def _generate_feedback_summary_in_background(call_id: int) -> None:
             negative = parsed.get("negative_feedback", [])
             topics = parsed.get("topics_discussed", [])
             rating = parsed.get("app_rating")
-            call.next_action = json.dumps({
-                "app_rating": rating,
-                "topics_discussed": topics,
-                "positive_feedback": positive,
-                "negative_feedback": negative,
-            })
+            call.next_action = json.dumps(
+                {
+                    "app_rating": rating,
+                    "topics_discussed": topics,
+                    "positive_feedback": positive,
+                    "negative_feedback": negative,
+                }
+            )
         except Exception:
             logger.exception("Feedback summary generation failed for call %s", call_id)
             call.support_summary = "Feedback call completed. Review transcript for details."
@@ -764,8 +827,6 @@ def _generate_feedback_summary_in_background(call_id: int) -> None:
         logger.exception("Background feedback summary thread failed for call %s", call_id)
     finally:
         db.close()
-
-    thread = None  # allow GC
 
 
 def generate_feedback_summary(db: Session, call: Call) -> None:

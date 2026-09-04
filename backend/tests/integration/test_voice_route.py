@@ -4,6 +4,8 @@ import hmac
 import secrets
 import time
 
+from app.agent.client import StreamDelta
+from app.agent.context import SessionContext
 from app.core.config import settings
 from app.models.call import Call
 from app.models.enums import CallStatus
@@ -21,6 +23,14 @@ class _SlowFakeAgentClient(FakeAgentClient):
         return super().generate(system=system, contents=contents, tools=tools)
 
 
+class _StreamingFeedbackClient:
+    """Streams an intentionally over-questioning response for pacing tests."""
+
+    def stream_generate(self, *, system, contents, tools):
+        yield StreamDelta(text="I understand. How easy is the app to navigate? ")
+        yield StreamDelta(text="What would you improve first?")
+
+
 def _sign(url: str, params: dict[str, str]) -> str:
     """Builds a Twilio-compatible test signature for one request."""
     body = url + "".join(f"{key}{params[key]}" for key in sorted(params))
@@ -28,7 +38,12 @@ def _sign(url: str, params: dict[str, str]) -> str:
     return base64.b64encode(mac.digest()).decode()
 
 
-def _seed_call(db_session, seeded_astrologer, twilio_call_sid="CA" + "0" * 32):
+def _seed_call(
+    db_session,
+    seeded_astrologer,
+    twilio_call_sid="CA" + "0" * 32,
+    triggered_by="user_request",
+):
     """Creates an in-progress call with a real opaque relay identifier."""
     call = Call(
         astrologer_id=seeded_astrologer.id,
@@ -36,6 +51,7 @@ def _seed_call(db_session, seeded_astrologer, twilio_call_sid="CA" + "0" * 32):
         twilio_call_sid=twilio_call_sid,
         relay_token=secrets.token_urlsafe(32),
         status=CallStatus.IN_PROGRESS,
+        triggered_by=triggered_by,
     )
     db_session.add(call)
     db_session.commit()
@@ -193,6 +209,34 @@ def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
     db_session.refresh(call)
     assert "What is my payout status?" in call.transcript
     assert "Your payout is scheduled for the 5th." in call.transcript
+
+
+def test_feedback_call_asks_only_one_question_per_turn(db_session, seeded_astrologer):
+    """Feedback survey prompts are capped before they are spoken to a caller."""
+    call = _seed_call(db_session, seeded_astrologer, triggered_by="feedback_call")
+    ctx = SessionContext(
+        astrologer_id=seeded_astrologer.id,
+        name=seeded_astrologer.name,
+        language=seeded_astrologer.language,
+        db=db_session,
+        session_id=None,
+    )
+    spoken = []
+
+    reply = call_service.stream_feedback_turn(
+        db_session,
+        call,
+        ctx,
+        [],
+        "The app is mostly good.",
+        "Feedback prompt",
+        client=_StreamingFeedbackClient(),
+        on_token=spoken.append,
+    )
+
+    assert reply == "I understand. How easy is the app to navigate?"
+    assert "improve first" not in reply.lower()
+    assert "".join(spoken) == reply
 
 
 def test_conversation_relay_discards_reply_after_interrupt(

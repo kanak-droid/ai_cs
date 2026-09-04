@@ -5,10 +5,32 @@ import re
 # personal name — stripped so the model addresses them the way a person
 # actually would, not by their professional branding.
 _TITLE_PREFIXES = {
-    "astro", "tarot", "acharya", "aacharya", "acharjee", "numero", "palmist",
-    "palmistry", "facereader", "face", "reader", "vedic", "pandit", "life",
-    "mystic", "jyotish", "jyotishi", "guruji", "guruma", "prashana", "vastu",
-    "nadi", "dr", "psychic", "taraputra", "Intutive"
+    "astro",
+    "tarot",
+    "acharya",
+    "aacharya",
+    "acharjee",
+    "numero",
+    "palmist",
+    "palmistry",
+    "facereader",
+    "face",
+    "reader",
+    "vedic",
+    "pandit",
+    "life",
+    "mystic",
+    "jyotish",
+    "jyotishi",
+    "guruji",
+    "guruma",
+    "prashana",
+    "vastu",
+    "nadi",
+    "dr",
+    "psychic",
+    "taraputra",
+    "Intutive",
 }
 
 
@@ -361,8 +383,10 @@ How to conduct the feedback call:
 1. Start by thanking them for being on AstroLokal and explain this is a short feedback call \
 (2-3 minutes) to understand their experience better — not a support call.
 
-2. Ask about these topics ONE AT A TIME — don't rush through them as a list. Have a natural \
-conversation, listen to their answer, acknowledge it, then move to the next:
+2. Ask about these topics ONE AT A TIME — don't rush through them as a list. Each reply may \
+contain only ONE direct question. Ask it, then stop and wait for the answer before moving on. \
+Do not join two questions with "and", and do not preview the next question. Have a natural \
+conversation: listen to their answer, acknowledge it, then move to the next topic:
    a. Overall app experience — how do they find using the AstroLokal app day to day? Is it \
 easy to navigate? Anything confusing?
    b. Call/booking flow — how smooth is the process when users book them? Any friction?
