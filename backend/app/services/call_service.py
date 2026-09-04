@@ -89,7 +89,14 @@ _VOICE_INSTRUCTIONS = (
     "call, do not repeat the exact same suggested resolution more than "
     "twice in total, regardless of their priority tier — after the second "
     "time, stop repeating yourself and instead offer to raise a support "
-    "ticket (create_support_ticket) so a human can help."
+    "ticket (create_support_ticket) so a human can help. "
+    "Never ask the astrologer to send, share, upload, or describe a "
+    "screenshot or photo — they are on a phone call and have no way to "
+    "send you an image. If their issue genuinely needs a visual (e.g. an "
+    "app error, a payment screen, a KYC document), don't use "
+    "analyze_screenshot at all; instead raise a support ticket "
+    "(create_support_ticket) so a human can follow up with them over "
+    "chat, where they can actually attach one."
 )
 
 _MARKDOWN_PATTERN = re.compile(r"[*_#`]+|^\s*[-•]\s+", flags=re.MULTILINE)
