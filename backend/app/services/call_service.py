@@ -40,6 +40,7 @@ from app.agent.client import AgentClient, StreamingAgentClient
 from app.agent.context import SessionContext
 from app.agent.openrouter_client import get_voice_agent_client
 from app.agent.orchestrator import HistoryTurn, run_chat_turn, run_streaming_chat_turn
+from app.agent.prompt import render_feedback_prompt
 from app.core.config import settings
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.security import AstrologerContext
@@ -73,6 +74,12 @@ _VOICE_BY_LANGUAGE: dict[str, tuple[str, str | None, str]] = {
     "English": ("en-US", None, "Hi {name}, this is AstroHelp support. How can I help you today?"),
 }
 _DEFAULT_VOICE = _VOICE_BY_LANGUAGE["Hindi"]
+
+_FEEDBACK_GREETING_BY_LANGUAGE: dict[str, str] = {
+    "Hindi": "Namaste {name}, main AstroHelp team se bol raha hoon. Aapka thoda sa waqt le sakta hoon? Hum aapka app experience jaanna chahte hain.",
+    "English": "Hi {name}, this is AstroHelp. Do you have a couple of minutes? We'd love to hear about your app experience.",
+}
+_DEFAULT_FEEDBACK_GREETING = _FEEDBACK_GREETING_BY_LANGUAGE["Hindi"]
 
 # Told to the model only on phone calls (see run_conversation_turn) — chat
 # has no equivalent constraint, since a chat UI renders markdown fine.
@@ -244,7 +251,13 @@ def generate_connect_twiml(call: Call) -> str:
         call.astrologer.language, _DEFAULT_VOICE
     )
     voice_attr = f' voice="{escape(voice)}"' if voice else ""
-    greeting = greeting_template.format(name=call.astrologer.name)
+    if call.triggered_by == "feedback_call":
+        fb_template = _FEEDBACK_GREETING_BY_LANGUAGE.get(
+            call.astrologer.language, _DEFAULT_FEEDBACK_GREETING
+        )
+        greeting = fb_template.format(name=call.astrologer.name)
+    else:
+        greeting = greeting_template.format(name=call.astrologer.name)
 
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -584,4 +597,184 @@ def handle_status_callback(db: Session, call_id: int, twilio_status: str) -> Non
             call.ended_reason = twilio_status
     db.commit()
     if twilio_status in _TERMINAL_TWILIO_STATUSES:
-        generate_call_outcome_summary(db, call)
+        if call.triggered_by == "feedback_call":
+            _generate_feedback_summary_in_background(call.id)
+        else:
+            generate_call_outcome_summary(db, call)
+
+
+# ---------------------------------------------------------------------------
+# Feedback calls
+# ---------------------------------------------------------------------------
+
+_FEEDBACK_VOICE_INSTRUCTIONS = (
+    "You are speaking on a live phone call, not typing in a chat window. "
+    "Reply in plain, natural spoken sentences only — never use markdown "
+    "formatting (no asterisks, no bullet points or numbered lists, no "
+    "headers, no bold/italic syntax). Keep the conversation warm and casual."
+)
+
+_FEEDBACK_SUMMARY_PROMPT = """\
+Summarize this completed feedback phone call for an internal dashboard.
+The call was specifically to collect feedback about the AstroLokal app experience
+(NOT a support call). Extract structured insights from the transcript.
+
+Return valid JSON with exactly these fields:
+- "summary": 2-3 sentence overview of what feedback was shared
+- "app_rating": integer 1-5 (overall app satisfaction inferred from tone/words, \
+  or null if impossible to judge)
+- "topics_discussed": list of short topic strings covered (e.g. ["app_navigation", \
+  "payout_experience", "call_quality", "support_experience"])
+- "positive_feedback": list of specific positive things they mentioned
+- "negative_feedback": list of specific complaints or improvement suggestions
+- "key_suggestion": the single most actionable suggestion, or null if none
+
+Transcript:
+{transcript}"""
+
+
+def request_feedback_call(db: Session, astrologer_id: int) -> Call:
+    """Admin-triggered outbound feedback call to an astrologer."""
+    astrologer_row = db.get(Astrologer, astrologer_id)
+    if astrologer_row is None:
+        raise NotFoundError(f"No astrologer {astrologer_id}")
+    return _create_call(
+        db,
+        astrologer_row=astrologer_row,
+        triggered_by="feedback_call",
+    )
+
+
+def start_feedback_conversation(
+    db: Session, call_id: int
+) -> tuple[Call, SessionContext, list[HistoryTurn], str]:
+    """Like start_conversation but uses the feedback prompt and no prior chat."""
+    call = get_call(db, call_id)
+    astrologer_row = db.get(Astrologer, call.astrologer_id)
+    if astrologer_row is None:
+        raise NotFoundError(f"No astrologer {call.astrologer_id}")
+
+    ctx = SessionContext(
+        astrologer_id=astrologer_row.id,
+        name=astrologer_row.name,
+        language=astrologer_row.language,
+        db=db,
+        session_id=None,
+    )
+    feedback_prompt = render_feedback_prompt(astrologer_row.name)
+
+    if call.status == CallStatus.QUEUED:
+        call.status = CallStatus.IN_PROGRESS
+        db.commit()
+
+    return call, ctx, [], feedback_prompt
+
+
+def stream_feedback_turn(
+    db: Session,
+    call: Call,
+    ctx: SessionContext,
+    history: list[HistoryTurn],
+    user_message: str,
+    feedback_prompt: str,
+    *,
+    on_token: Callable[[str], None],
+    client: AgentClient | None = None,
+) -> str:
+    """Streams a feedback conversation turn — no tools, feedback system prompt."""
+    agent_client = client or get_voice_agent_client()
+    if hasattr(agent_client, "stream_generate"):
+        result = run_streaming_chat_turn(
+            cast(StreamingAgentClient, agent_client),
+            ctx,
+            user_message,
+            history=history,
+            extra_instructions=_FEEDBACK_VOICE_INSTRUCTIONS,
+            system_prompt_override=feedback_prompt,
+            disable_tools=True,
+            on_text=lambda token: on_token(_strip_markdown(token)),
+        )
+    else:
+        result = run_chat_turn(
+            agent_client,
+            ctx,
+            user_message,
+            history=history,
+            extra_instructions=_FEEDBACK_VOICE_INSTRUCTIONS,
+            system_prompt_override=feedback_prompt,
+            disable_tools=True,
+        )
+        on_token(_strip_markdown(result.reply))
+
+    return _persist_conversation_turn(
+        db,
+        call=call,
+        history=history,
+        user_message=user_message,
+        reply=result.reply,
+        trace=result.trace,
+        metadata=result.metadata,
+    )
+
+
+def _generate_feedback_summary_in_background(call_id: int) -> None:
+    """Generates a structured feedback summary in a background thread."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        call = db.get(Call, call_id)
+        if call is None or call.summary_generated_at is not None:
+            return
+
+        if not (settings.OPENROUTER_API_KEY and call.transcript):
+            call.support_summary = "Feedback call ended without a recorded conversation."
+            call.resolution_status = "not_connected"
+            call.summary_generated_at = utcnow()
+            db.commit()
+            return
+
+        prompt = _FEEDBACK_SUMMARY_PROMPT.format(
+            transcript=call.transcript[-_SUMMARY_TRANSCRIPT_LIMIT:]
+        )
+        try:
+            raw = get_voice_agent_client().generate_call_summary(prompt=prompt)
+            parsed = json.loads(raw)
+            call.support_summary = parsed.get("summary", "Feedback collected.")
+            call.resolution_status = "resolved"
+            call.suggested_solution = parsed.get("key_suggestion")
+            positive = parsed.get("positive_feedback", [])
+            negative = parsed.get("negative_feedback", [])
+            topics = parsed.get("topics_discussed", [])
+            rating = parsed.get("app_rating")
+            call.next_action = json.dumps({
+                "app_rating": rating,
+                "topics_discussed": topics,
+                "positive_feedback": positive,
+                "negative_feedback": negative,
+            })
+        except Exception:
+            logger.exception("Feedback summary generation failed for call %s", call_id)
+            call.support_summary = "Feedback call completed. Review transcript for details."
+            call.resolution_status = "resolved"
+
+        call.summary_generated_at = utcnow()
+        db.commit()
+    except Exception:
+        logger.exception("Background feedback summary thread failed for call %s", call_id)
+    finally:
+        db.close()
+
+    thread = None  # allow GC
+
+
+def generate_feedback_summary(db: Session, call: Call) -> None:
+    """Spawns background feedback summary — mirrors generate_call_outcome_summary."""
+    if call.summary_generated_at is not None:
+        return
+    thread = threading.Thread(
+        target=_generate_feedback_summary_in_background,
+        args=(call.id,),
+        daemon=True,
+    )
+    thread.start()

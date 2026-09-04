@@ -115,16 +115,18 @@ def run_chat_turn(
     *,
     history: list[HistoryTurn] | None = None,
     extra_instructions: str | None = None,
+    system_prompt_override: str | None = None,
+    disable_tools: bool = False,
 ) -> ChatTurnResult:
     # extra_instructions: an optional suffix appended to the system prompt,
     # for a caller-specific need that doesn't belong in the shared prompt
     # itself — e.g. call_service.py uses it to tell the model it's on a
     # live phone call and must speak in plain sentences, never markdown
     # (chat has no such constraint, so this stays opt-in and unused there).
-    system = render_system_prompt(name=ctx.name, language=ctx.language)
+    system = system_prompt_override or render_system_prompt(name=ctx.name, language=ctx.language)
     if extra_instructions:
         system = f"{system}\n\n{extra_instructions}"
-    tools = _build_tools()
+    tools = [] if disable_tools else _build_tools()
     contents: list[types.Content] = [
         types.Content(
             role="user" if turn.role == "astrologer" else "model",
@@ -195,6 +197,8 @@ def run_streaming_chat_turn(
     *,
     history: list[HistoryTurn] | None = None,
     extra_instructions: str | None = None,
+    system_prompt_override: str | None = None,
+    disable_tools: bool = False,
     on_text: Callable[[str], None],
 ) -> ChatTurnResult:
     """Runs the tool loop while streaming a final spoken answer to ``on_text``.
@@ -204,10 +208,10 @@ def run_streaming_chat_turn(
     their handlers finish; final answer deltas are handed to the callback as
     soon as they arrive, allowing the voice layer to start TTS immediately.
     """
-    system = render_system_prompt(name=ctx.name, language=ctx.language)
+    system = system_prompt_override or render_system_prompt(name=ctx.name, language=ctx.language)
     if extra_instructions:
         system = f"{system}\n\n{extra_instructions}"
-    tools = _build_tools()
+    tools = [] if disable_tools else _build_tools()
     contents: list[types.Content] = [
         types.Content(
             role="user" if turn.role == "astrologer" else "model",
