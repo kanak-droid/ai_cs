@@ -4,8 +4,6 @@ import hmac
 import secrets
 import time
 
-from app.agent.client import StreamDelta
-from app.agent.context import SessionContext
 from app.core.config import settings
 from app.models.call import Call
 from app.models.enums import CallStatus
@@ -21,18 +19,6 @@ class _SlowFakeAgentClient(FakeAgentClient):
     def generate(self, *, system, contents, tools):
         time.sleep(0.3)
         return super().generate(system=system, contents=contents, tools=tools)
-
-
-class _StreamingFakeAgentClient:
-    """Streams a deliberately over-questioning reply for voice pacing tests."""
-
-    def __init__(self) -> None:
-        self.calls = []
-
-    def stream_generate(self, *, system, contents, tools):
-        self.calls.append({"system": system, "contents": list(contents), "tools": tools})
-        yield StreamDelta(text="I understand. Which screen shows the error? ")
-        yield StreamDelta(text="When did it first start happening?")
 
 
 def _sign(url: str, params: dict[str, str]) -> str:
@@ -207,65 +193,6 @@ def test_conversation_relay_websocket_runs_the_same_orchestrator_as_chat(
     db_session.refresh(call)
     assert "What is my payout status?" in call.transcript
     assert "Your payout is scheduled for the 5th." in call.transcript
-
-
-def test_support_call_speaks_only_one_question_per_turn(db_session, seeded_astrologer):
-    """A survey-style model reply is capped before it reaches the caller."""
-    call = _seed_call(db_session, seeded_astrologer)
-    client = FakeAgentClient(
-        [
-            text_response(
-                "I understand the issue. Which screen shows the error? "
-                "And when did it first start happening?"
-            )
-        ]
-    )
-    ctx = SessionContext(
-        astrologer_id=seeded_astrologer.id,
-        name=seeded_astrologer.name,
-        language=seeded_astrologer.language,
-        db=db_session,
-        session_id=None,
-    )
-
-    reply = call_service.run_conversation_turn(
-        db_session,
-        call,
-        ctx,
-        [],
-        "The app is showing an error.",
-        client=client,
-    )
-
-    assert reply == "I understand the issue. Which screen shows the error?"
-    assert "when did it first start" not in reply.lower()
-    assert "ask at most ONE question" in client.calls[0]["system"]
-
-
-def test_streaming_support_call_stops_after_its_first_question(db_session, seeded_astrologer):
-    """The streaming path must enforce the same pacing as the fallback path."""
-    call = _seed_call(db_session, seeded_astrologer)
-    ctx = SessionContext(
-        astrologer_id=seeded_astrologer.id,
-        name=seeded_astrologer.name,
-        language=seeded_astrologer.language,
-        db=db_session,
-        session_id=None,
-    )
-    spoken = []
-
-    reply = call_service.stream_conversation_turn(
-        db_session,
-        call,
-        ctx,
-        [],
-        "The app is showing an error.",
-        client=_StreamingFakeAgentClient(),
-        on_token=spoken.append,
-    )
-
-    assert reply == "I understand. Which screen shows the error?"
-    assert "".join(spoken) == reply
 
 
 def test_conversation_relay_discards_reply_after_interrupt(

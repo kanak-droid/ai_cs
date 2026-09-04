@@ -85,13 +85,6 @@ _VOICE_INSTRUCTIONS = (
     "formatting (no asterisks, no bullet points or numbered lists, no "
     "headers, no bold/italic syntax). Say amounts and dates the way a "
     "person would say them aloud, not as a formatted table. "
-    "Voice turn-taking is mandatory: ask at most ONE question in each "
-    "reply. You may give a short acknowledgement or explanation before "
-    "that question, but once you ask it, STOP speaking and wait for the "
-    "astrologer's answer. Never ask a list of questions, never combine "
-    "multiple requests with 'and', and never preview the next question. "
-    "After the astrologer answers, acknowledge that answer and then ask "
-    "only the next single most important question, if one is needed. "
     "If the astrologer keeps describing the same problem again in this "
     "call, do not repeat the exact same suggested resolution more than "
     "twice in total, regardless of their priority tier — after the second "
@@ -107,7 +100,6 @@ _VOICE_INSTRUCTIONS = (
 )
 
 _MARKDOWN_PATTERN = re.compile(r"[*_#`]+|^\s*[-•]\s+", flags=re.MULTILINE)
-_SENTENCE_END_PATTERN = re.compile(r"(?<=[.!?।])(?=\s|$)")
 
 
 def _strip_markdown(text: str) -> str:
@@ -117,65 +109,6 @@ def _strip_markdown(text: str) -> str:
     is ever sent to ConversationRelay to be spoken.
     """
     return _MARKDOWN_PATTERN.sub("", text)
-
-
-class _OneQuestionVoiceReply:
-    """Streams a support reply sentence-by-sentence with one-question pacing.
-
-    ConversationRelay can start speaking as soon as it receives text. Holding
-    only the current sentence keeps that low-latency behaviour while making a
-    hard guardrail possible: once the model asks a question, no later sentence
-    from that same turn is spoken. The next question can only be generated
-    after ConversationRelay sends the caller's next final transcript.
-    """
-
-    def __init__(self, on_text: Callable[[str], None] | None = None) -> None:
-        """Creates a reply buffer that optionally forwards approved text."""
-        self._on_text = on_text
-        self._pending = ""
-        self._spoken_parts: list[str] = []
-        self._question_asked = False
-
-    @property
-    def reply(self) -> str:
-        """Returns exactly the text approved for speech and persistence."""
-        return "".join(self._spoken_parts).strip()
-
-    def add(self, text: str) -> None:
-        """Adds a streaming model fragment and speaks complete safe sentences."""
-        if not text or self._question_asked:
-            return
-        self._pending += text
-        while match := _SENTENCE_END_PATTERN.search(self._pending):
-            sentence = self._pending[: match.end()]
-            self._pending = self._pending[match.end() :]
-            self._approve_sentence(sentence)
-            if self._question_asked:
-                self._pending = ""
-                return
-
-    def finish(self) -> None:
-        """Flushes an incomplete final sentence when no question was asked."""
-        if not self._question_asked and self._pending:
-            question_index = self._pending.find("?")
-            final_sentence = (
-                self._pending if question_index < 0 else self._pending[: question_index + 1]
-            )
-            self._approve_sentence(final_sentence)
-            self._pending = ""
-
-    def _approve_sentence(self, sentence: str) -> None:
-        """Speaks one sentence and closes the turn if it asks a question."""
-        if self._question_asked:
-            return
-        clean_sentence = _strip_markdown(sentence)
-        if not clean_sentence:
-            return
-        self._spoken_parts.append(clean_sentence)
-        if self._on_text is not None:
-            self._on_text(clean_sentence)
-        if "?" in clean_sentence:
-            self._question_asked = True
 
 
 # Twilio's own CallStatus values (status-callback's `CallStatus` form field)
@@ -441,15 +374,12 @@ def run_conversation_turn(
         history=history,
         extra_instructions=f"{_VOICE_INSTRUCTIONS}{ticket_context}",
     )
-    reply_limiter = _OneQuestionVoiceReply()
-    reply_limiter.add(result.reply)
-    reply_limiter.finish()
     return _persist_conversation_turn(
         db,
         call=call,
         history=history,
         user_message=user_message,
-        reply=reply_limiter.reply,
+        reply=result.reply,
         trace=result.trace,
         metadata=result.metadata,
     )
@@ -472,7 +402,6 @@ def stream_conversation_turn(
     """
     agent_client = client or get_voice_agent_client()
     instructions = f"{_VOICE_INSTRUCTIONS}{_ticket_context(call)}"
-    reply_limiter = _OneQuestionVoiceReply(on_text=on_token)
     if hasattr(agent_client, "stream_generate"):
         result = run_streaming_chat_turn(
             cast(StreamingAgentClient, agent_client),
@@ -480,7 +409,7 @@ def stream_conversation_turn(
             user_message,
             history=history,
             extra_instructions=instructions,
-            on_text=reply_limiter.add,
+            on_text=lambda token: on_token(_strip_markdown(token)),
         )
     else:
         result = run_chat_turn(
@@ -490,15 +419,14 @@ def stream_conversation_turn(
             history=history,
             extra_instructions=instructions,
         )
-        reply_limiter.add(result.reply)
-    reply_limiter.finish()
+        on_token(_strip_markdown(result.reply))
 
     return _persist_conversation_turn(
         db,
         call=call,
         history=history,
         user_message=user_message,
-        reply=reply_limiter.reply,
+        reply=result.reply,
         trace=result.trace,
         metadata=result.metadata,
     )
