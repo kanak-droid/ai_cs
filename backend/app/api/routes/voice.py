@@ -153,7 +153,14 @@ async def conversation_relay(
         if setup_token and setup_token != call_token:
             await websocket.close(code=1008)
             return
-        call, ctx, history = call_service.start_conversation(db, call.id)
+        is_feedback = call.triggered_by == "feedback_call"
+        if is_feedback:
+            call, ctx, history, feedback_prompt = call_service.start_feedback_conversation(
+                db, call.id
+            )
+        else:
+            call, ctx, history = call_service.start_conversation(db, call.id)
+            feedback_prompt = None
     except Exception:
         logger.exception("Failed to start conversation for call token %s", call_token)
         await websocket.close(code=1011)
@@ -175,17 +182,31 @@ async def conversation_relay(
                 if token:
                     event_loop.call_soon_threadsafe(token_queue.put_nowait, token)
 
-            generation_task = asyncio.create_task(
-                asyncio.to_thread(
-                    call_service.stream_conversation_turn,
-                    db,
-                    call,
-                    ctx,
-                    history,
-                    user_message,
-                    on_token=enqueue_token,
+            if is_feedback:
+                generation_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        call_service.stream_feedback_turn,
+                        db,
+                        call,
+                        ctx,
+                        history,
+                        user_message,
+                        feedback_prompt,
+                        on_token=enqueue_token,
+                    )
                 )
-            )
+            else:
+                generation_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        call_service.stream_conversation_turn,
+                        db,
+                        call,
+                        ctx,
+                        history,
+                        user_message,
+                        on_token=enqueue_token,
+                    )
+                )
             try:
                 while not generation_task.done():
                     try:

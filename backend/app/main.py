@@ -11,6 +11,7 @@ from app.api.routes.admin import admins as admin_admins
 from app.api.routes.admin import analytics as admin_analytics
 from app.api.routes.admin import astrologers as admin_astrologers
 from app.api.routes.admin import call_logs as admin_call_logs
+from app.api.routes.admin import feedback_calls as admin_feedback_calls
 from app.api.routes.admin import chat_logs as admin_chat_logs
 from app.api.routes.admin import email_log as admin_email_log
 from app.api.routes.admin import login as admin_login
@@ -72,6 +73,7 @@ app.include_router(admin_slack_log.router)
 app.include_router(admin_admins.router)
 app.include_router(admin_analytics.router)
 app.include_router(admin_call_logs.router)
+app.include_router(admin_feedback_calls.router)
 app.include_router(admin_chat_logs.router)
 app.include_router(admin_email_log.router)
 app.include_router(admin_sheets_sync.router)

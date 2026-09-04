@@ -9,6 +9,8 @@ import { CallLogDetailPage } from "./features/callLogs/pages/CallLogDetailPage";
 import { CallLogsPage } from "./features/callLogs/pages/CallLogsPage";
 import { ChatLogsPage } from "./features/chatLogs/pages/ChatLogsPage";
 import { ChatSessionDetailPage } from "./features/chatLogs/pages/ChatSessionDetailPage";
+import { FeedbackCallDetailPage } from "./features/feedbackCalls/pages/FeedbackCallDetailPage";
+import { FeedbackCallsPage } from "./features/feedbackCalls/pages/FeedbackCallsPage";
 import { EmailLogPage } from "./features/emailLog/pages/EmailLogPage";
 import { SheetsSyncPage } from "./features/sheetsSync/pages/SheetsSyncPage";
 import { SlackLogPage } from "./features/slackLog/pages/SlackLogPage";
@@ -55,6 +57,26 @@ const router = createBrowserRouter([
       <RequireAuth>
         <AppShell>
           <CallLogDetailPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/feedback-calls",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <FeedbackCallsPage />
+        </AppShell>
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/feedback-calls/:id",
+    element: (
+      <RequireAuth>
+        <AppShell>
+          <FeedbackCallDetailPage />
         </AppShell>
       </RequireAuth>
     ),
